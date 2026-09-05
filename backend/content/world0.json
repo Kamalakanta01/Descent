@@ -1,0 +1,525 @@
+{
+  "world": 0,
+  "units": [
+    {
+      "unit_id": "w0u0",
+      "lessons": [
+        {
+          "id": "w0u0l1",
+          "title": "Entities as Arrays of Structs",
+          "theory": "In data-oriented C, a game entity is not an object — it is a row in a table. All particles, NPCs, or projectiles live in one array of structs, and every system is a loop that reads/writes that array sequentially.\n\nWhy? Cache lines on modern CPUs are 64 bytes, and a tight loop over contiguous memory streams them in and out cheaply. One `malloc` per particle per frame, by contrast, scatters the data across the heap and thrashes the cache.\n\nThe rule is simple: store the data compactly, iterate linearly, do the work in batch.",
+          "worked_example": {
+            "title": "Updating a hundred particles in place",
+            "code": "typedef struct {\n    float x, y;       // position\n    float vx, vy;     // velocity\n} Particle;\n\nstatic Particle particles[1000];\n\nstatic void integrate(Particle *ps, int n, float dt) {\n    const float G = 9.8f;          // gravity, m/s^2\n    for (int i = 0; i < n; i++) {\n        ps[i].vy -= G * dt;          // 1. update velocity first\n        ps[i].x  += ps[i].vx * dt;   // 2. then position uses new vy\n        ps[i].y  += ps[i].vy * dt;\n    }\n}",
+            "explanation": "Updating velocity before position (semi-implicit Euler) is far more stable than the naive order — we will use this again in the calculus unit. The struct is 16 bytes (4 floats), so 4 particles fit in one cache line, and the inner loop touches them in the order the hardware prefers."
+          },
+          "practice": [
+            {"q": "Why is one large array of structs usually faster than one struct per heap allocation?", "choices": ["Cache locality from contiguous memory", "The compiler can elide bounds checks", "Garbage collection helps"], "answer": 0, "explanation": "Contiguous arrays stream through cache lines. Heap-per-object scatters the data and the CPU spends most of its time waiting on memory."},
+            {"q": "You add a new field to Particle. What happens to memory layout?", "choices": ["Each element's stride grows; the array stays sequential", "Realloc moves every particle to a new location", "The compiler silently removes the field"], "answer": 0, "explanation": "Strides grow, the array stays packed. (Realloc is only required if the array no longer fits.)"}
+          ],
+          "checkpoint": {
+            "id": "w0u0l1c",
+            "title": "Implement semi-implicit Euler for particles",
+            "instructions": "Implement `void integrate(Particle *ps, int n, float dt)`. Apply gravity (G = 9.8) downward: subtract from vy first, then update x and y with the new vy. The harness checks the results against hand-computed values.",
+            "starter_code": "typedef struct { float x, y, vx, vy; } Particle;\n\nvoid integrate(Particle *ps, int n, float dt) {\n    const float G = 9.8f;\n    /* TODO: semi-implicit Euler. vx/vy update first, then x/y. */\n}\n",
+            "kind": "function",
+            "harness": "#include <stdio.h>\n#include <math.h>\n#include \"learner.c\"\nstatic int fails = 0;\nstatic void chk(const char *n, int cond, double got, double exp) {\n    if (!cond) { printf(\"FAIL %s got=%f exp=%f\\n\", n, got, exp); fails++; }\n}\nint main(void) {\n    Particle ps[3] = {\n        {0, 10,  1,  0},\n        {5, 20, -2,  3},\n        {-4, 0,  0,  0},\n    };\n    integrate(ps, 3, 0.5f);\n    chk(\"p0.vy\", fabsf(ps[0].vy - (-4.9f)) < 1e-3f, ps[0].vy, -4.9f);\n    chk(\"p0.x\",  fabsf(ps[0].x  - 0.5f) < 1e-3f,  ps[0].x, 0.5f);\n    chk(\"p0.y\",  fabsf(ps[0].y  - (10 + -4.9f * 0.5f)) < 1e-3f, ps[0].y, 10 + -4.9f * 0.5f);\n    chk(\"p1.x\",  fabsf(ps[1].x  - 4.0f) < 1e-3f,  ps[1].x, 4.0f);\n    chk(\"p2.vy\", fabsf(ps[2].vy - (-4.9f)) < 1e-3f, ps[2].vy, -4.9f);\n    if (!fails) printf(\"ALL PASS\\n\");\n    return fails ? 1 : 0;\n}\n",
+            "static_hints": [
+              "Update vy first (semi-implicit Euler), then use the new vy when updating y.",
+              "Loop `for (int i = 0; i < n; i++)` and operate on ps[i] — a struct pointer 'steps' by sizeof(Particle) each ++."
+            ]
+          }
+        },
+        {
+          "id": "w0u0l2",
+          "title": "Function Pointers & Behavior Dispatch",
+          "theory": "When every entity in a type uses the same update code, the compiler unrolls the loop. When entities have different behaviors, the obvious C answer is a `switch` on a tag — and the obvious C *problem* is that the switch runs on every entity, every frame, killing the branch predictor.\n\nThe fix is to store the behavior as a function pointer in the struct, and call it through the pointer. The signature is uniform; the dispatch is one indirect call, and identical shapes cluster in the same hot loop.",
+          "worked_example": {
+            "title": "Per-bot behavior via function pointer",
+            "code": "struct Bot;\ntypedef void (*UpdateFn)(struct Bot *b, float dt);\n\nstruct Bot {\n    float x;\n    UpdateFn update;\n};\n\nstatic void march(Bot *b, float dt) { b->x += 2.0f * dt; }\nstatic void jitter(Bot *b, float dt) { b->x -= 1.0f * dt; }\n\nstatic void update_all(Bot *bots, int n, float dt) {\n    for (int i = 0; i < n; i++) {\n        if (bots[i].update) bots[i].update(&bots[i], dt);\n    }\n}",
+            "explanation": "Forward-declaring `struct Bot` lets the function-pointer typedef mention the type before the full struct is defined. The `if (bots[i].update)` guard lets bots opt out of an update step this frame without crashing."
+          },
+          "practice": [
+            {"q": "Why might a switch-by-tag be slower than a function pointer for AI behavior?", "choices": ["The switch runs every entity every frame, defeating the branch predictor", "Function pointers are SIMD-optimised", "The compiler refuses to vectorise switches"], "answer": 0, "explanation": "An indirect call still does one branch per entity — but it can cluster when most entities share a behavior."},
+            {"q": "What does `void (*f)(Entity*, float)` declare?", "choices": ["A variable f that holds a pointer to such a function", "A function f that takes two args", "An array of function pointers"], "answer": 0, "explanation": "The parens around `*f` mean f is a pointer; the rest is the function signature."}
+          ],
+          "checkpoint": {
+            "id": "w0u0l2c",
+            "title": "Implement behavior dispatch",
+            "instructions": "Implement `void update_all(Bot *bots, int n, float dt)`. Call each bot's `update` function pointer with `&bots[i]` and `dt`. Skip bots whose `update` is NULL.",
+            "starter_code": "struct Bot;\ntypedef void (*UpdateFn)(struct Bot *b, float dt);\nstruct Bot { float x; UpdateFn update; };\n\nvoid update_all(Bot *bots, int n, float dt) {\n    /* TODO: loop over bots, call bots[i].update(&bots[i], dt) when not NULL */\n}\n",
+            "kind": "function",
+            "harness": "#include \"learner.c\"\nstatic void march(Bot *b, float dt) { b->x += 2.0f * dt; }\nstatic void jitter(Bot *b, float dt) { b->x -= 1.0f * dt; }\nint main(void) {\n    Bot bots[4] = {\n        {0.0f, march}, {10.0f, jitter}, {5.0f, march}, {1.0f, NULL},\n    };\n    update_all(bots, 4, 2.0f);\n    int f = 0;\n    if (fabsf(bots[0].x - 4.0f) > 1e-4f) { printf(\"FAIL p0 x=%f\\n\", bots[0].x); f++; }\n    if (fabsf(bots[1].x - 8.0f) > 1e-4f) { printf(\"FAIL p1 x=%f\\n\", bots[1].x); f++; }\n    if (fabsf(bots[2].x - 9.0f) > 1e-4f) { printf(\"FAIL p2 x=%f\\n\", bots[2].x); f++; }\n    if (fabsf(bots[3].x - 1.0f) > 1e-4f) { printf(\"FAIL p3 (NULL) x=%f\\n\", bots[3].x); f++; }\n    if (!f) printf(\"ALL PASS\\n\");\n    return f ? 1 : 0;\n}\n",
+            "static_hints": [
+              "Pass `&bots[i]` as the first argument so the callback can mutate the bot.",
+              "Guard with `if (bots[i].update)` — calling a NULL function pointer crashes."
+            ]
+          }
+        },
+        {
+          "id": "w0u0l3",
+          "title": "Tagged Unions (Variants)",
+          "theory": "Real entities come in kinds: a collider is a circle or a rect, an item is a sword or a potion, a packet is a connection or a disconnect. Storing each kind in a different array is wasteful when most fields are common; storing a `void*` loses type safety.\n\nThe C idiom is a *tagged union*: a tag enum tells you which arm of a `union` is active. The union is the size of its largest member (plus padding). The tag costs almost nothing, and lets you write `switch (s.tag) { ... }` to safely read the right arm.",
+          "worked_example": {
+            "title": "Shape area with a tagged union",
+            "code": "typedef enum { SHAPE_CIRCLE, SHAPE_RECT } ShapeTag;\ntypedef struct { float r; } Circle;\ntypedef struct { float w, h; } Rect;\ntypedef struct {\n    ShapeTag tag;\n    union { Circle c; Rect r; } as;\n} Shape;\n\nstatic float shape_area(Shape s) {\n    switch (s.tag) {\n        case SHAPE_CIRCLE: return 3.14159265f * s.as.c.r * s.as.c.r;\n        case SHAPE_RECT:   return s.as.r.w * s.as.r.h;\n    }\n    return 0.0f; // unreachable if tags are valid\n}",
+            "explanation": "The union overlaps `c` and `r` in memory — only one is live at a time. The tag is the contract. This pattern is the foundation of every event system, message bus, and entity component in the later units."
+          },
+          "practice": [
+            {"q": "Why is the tag stored alongside the union?", "choices": ["The union doesn't remember which arm is active", "The tag lets us use a smaller struct", "C requires it for ABI"], "answer": 0, "explanation": "Reading the wrong arm is undefined behaviour. The tag is the only thing that tells you which arm is live."},
+            {"q": "What is `sizeof(union { Circle c; Rect r; })` (Circle has 1 float, Rect has 2)?", "choices": ["sizeof(Rect) + padding (the largest member)", "sizeof(Circle) * 2", "Undefined"], "answer": 0, "explanation": "Unions overlay their members; the size is the largest plus padding for alignment."}
+          ],
+          "checkpoint": {
+            "id": "w0u0l3c",
+            "title": "Implement shape_area",
+            "instructions": "Implement `float shape_area(Shape s)`. For SHAPE_CIRCLE use `s.as.c.r` with `3.14159265f` for pi; for SHAPE_RECT use `s.as.r.w * s.as.r.h`.",
+            "starter_code": "typedef enum { SHAPE_CIRCLE, SHAPE_RECT } ShapeTag;\ntypedef struct { float r; } Circle;\ntypedef struct { float w, h; } Rect;\ntypedef struct { ShapeTag tag; union { Circle c; Rect r; } as; } Shape;\n\nfloat shape_area(Shape s) {\n    /* TODO */\n    return 0.0f;\n}\n",
+            "kind": "function",
+            "harness": "#include <math.h>\n#include \"learner.c\"\nint main(void) {\n    Shape s1 = { SHAPE_CIRCLE, .as.c = {2.0f} };\n    Shape s2 = { SHAPE_RECT,   .as.r = {3.0f, 4.0f} };\n    Shape s3 = { SHAPE_CIRCLE, .as.c = {0.5f} };\n    Shape s4 = { SHAPE_RECT,   .as.r = {0.0f, 5.0f} };\n    int f = 0;\n    if (fabsf(shape_area(s1) - 3.14159265f * 4.0f) > 1e-3f) { printf(\"FAIL circle r=2\\n\"); f++; }\n    if (fabsf(shape_area(s2) - 12.0f) > 1e-3f) { printf(\"FAIL rect 3x4\\n\"); f++; }\n    if (fabsf(shape_area(s3) - 3.14159265f * 0.25f) > 1e-3f) { printf(\"FAIL circle r=0.5\\n\"); f++; }\n    if (fabsf(shape_area(s4) - 0.0f) > 1e-3f) { printf(\"FAIL rect zero\\n\"); f++; }\n    if (!f) printf(\"ALL PASS\\n\");\n    return f ? 1 : 0;\n}\n",
+            "static_hints": [
+              "Switch on `s.tag` and return the formula for each case.",
+              "Use designated initializers (`.as.c = {2.0f}`) to keep callers readable — and to remind yourself which arm is live."
+            ]
+          }
+        },
+        {
+          "id": "w0u0l4",
+          "title": "Arena Allocators",
+          "theory": "Per-frame `malloc`/`free` creates fragmentation, the kind of latency that ruins 60 fps guarantees. An arena is a one-shot block of memory with a bump pointer: allocations are O(1) and bumping forward, and \"free\" resets the pointer when the frame ends.\n\nThe contract is the arena owns the lifetimes, not the callers. Perfect for transient per-frame data and per-frame scratch buffers.",
+          "worked_example": {
+            "title": "Bump allocator with 8-byte alignment",
+            "code": "typedef struct { char *base; size_t cap; size_t off; } Arena;\n\nstatic void *arena_alloc(Arena *a, size_t bytes) {\n    /* 1. Round up current offset to 8-byte boundary for alignment */\n    size_t aligned = (a->off + 7u) & ~(size_t)7u;\n    /* 2. Out of memory? */\n    if (aligned + bytes > a->cap) return NULL;\n    /* 3. Hand out the pointer and advance */\n    void *p = a->base + aligned;\n    a->off = aligned + bytes;\n    return p;\n}\n\nstatic void arena_reset(Arena *a) { a->off = 0; }",
+            "explanation": "Alignment matters because some architectures trap on misaligned loads (and even on x86 it is a perf cliff). 8 bytes is the minimum for `double`; you might choose 16 for SIMD types."
+          },
+          "practice": [
+            {"q": "When is it safe to call `arena_reset`?", "choices": ["When no allocation from this arena is still needed (e.g. end of frame)", "After every allocation", "Only once per process"], "answer": 0, "explanation": "The arena forgets everything on reset. If a pointer escaped and is still in use, the next allocation may overwrite it."},
+            {"q": "Why align allocations?", "choices": ["Performance and to satisfy alignment requirements of some types", "It uses less memory", "It prevents integer overflow"], "answer": 0, "explanation": "Some architectures fault on misaligned access; on x86/ARM it is a performance trap for SIMD and doubles."}
+          ],
+          "checkpoint": {
+            "id": "w0u0l4c",
+            "title": "Implement arena_alloc",
+            "instructions": "Implement `void *arena_alloc(Arena *a, size_t bytes)`. Round the current offset up to the next multiple of 8, return NULL if the request would exceed `a->cap`, otherwise return a pointer to the slot and advance the offset.",
+            "starter_code": "typedef struct { char *base; size_t cap; size_t off; } Arena;\n\nvoid *arena_alloc(Arena *a, size_t bytes) {\n    /* TODO: align a->off up to 8; check capacity; return pointer and advance */\n    return NULL;\n}\n",
+            "kind": "function",
+            "harness": "#include <stdint.h>\n#include <string.h>\n#include <stdio.h>\n#include \"learner.c\"\nstatic int fails = 0;\n#define CHK(c) do { if (!(c)) { printf(\"FAIL %s\\n\", #c); fails++; } } while (0)\nint main(void) {\n    static _Alignas(16) char buf[64];\n    Arena a = { buf, sizeof buf, 0 };\n\n    void *p1 = arena_alloc(&a, 3);\n    CHK(p1 == buf);\n    CHK(((uintptr_t)p1 % 8) == 0);\n    CHK(a.off == 8);\n\n    void *p2 = arena_alloc(&a, 1);\n    CHK(p2 == buf + 8);\n    CHK(((uintptr_t)p2 % 8) == 0);\n    CHK(a.off == 16);\n\n    void *p3 = arena_alloc(&a, 17);\n    CHK(p3 == buf + 16);\n    CHK(((uintptr_t)p3 % 8) == 0);\n    CHK(a.off == 40);\n\n    void *p4 = arena_alloc(&a, 1000);\n    CHK(p4 == NULL);\n    CHK(a.off == 40);\n\n    memset(p1, 'A', 3);\n    memset(p2, 'B', 1);\n    memset(p3, 'C', 17);\n    CHK(((char*)p1)[0] == 'A' && ((char*)p2)[0] == 'B' && ((char*)p3)[0] == 'C');\n\n    if (!fails) printf(\"ALL PASS\\n\");\n    return fails ? 1 : 0;\n}\n",
+            "static_hints": [
+              "Aligned offset: `size_t aligned = (a->off + 7u) & ~(size_t)7u;`",
+              "Out-of-memory: return NULL *without* advancing the offset."
+            ]
+          }
+        },
+        {
+          "id": "w0u0l5",
+          "title": "Fixed-Size Strings",
+          "theory": "Heap-allocated strings per entity per frame churn memory. In a data-oriented layout, you embed a fixed buffer directly in the struct: `char name[32]`. The price is discipline: every copy must be bounded, every buffer must be NUL-terminated, and `snprintf` is your friend.\n\nThe classic bug: `strncpy(dst, src, 32)` on a 32-byte buffer copies up to 32 bytes and does *not* write a terminator when the source is exactly 32 or longer. Always set `dst[N-1] = '\\0'` after.",
+          "worked_example": {
+            "title": "Bounded string copy",
+            "code": "typedef struct { char data[32]; } FixStr;\n\nstatic void fs_copy(FixStr *dst, const char *src) {\n    size_t i = 0;\n    for (; i + 1 < sizeof dst->data && src[i]; i++) dst->data[i] = src[i];\n    dst->data[i] = '\\0';\n}\n\nstatic void fs_print(const FixStr *s) { printf(\"%s\\n\", s->data); }",
+            "explanation": "We stop one byte early to leave room for the terminator. If the source is short, we still write a NUL; if it is long, we truncate and NUL-terminate. No buffer can ever overflow."
+          },
+          "practice": [
+            {"q": "What can go wrong with `strcpy` into a fixed-size buffer?", "choices": ["Buffer overflow if the source is too long", "Silent truncation", "Compilation error"], "answer": 0, "explanation": "`strcpy` trusts the caller. In a fixed-size struct that lives in a 100k-element array, this is a one-line remote code execution."},
+            {"q": "After `strncpy` of a too-long source, what must you do?", "choices": ["Manually set `buf[N-1] = '\\0'`", "Nothing — strncpy is safe", "Allocate a larger buffer"], "answer": 0, "explanation": "`strncpy` does not NUL-terminate when the source is exactly N or longer. Always set the last byte yourself."}
+          ],
+          "checkpoint": {
+            "id": "w0u0l5c",
+            "title": "Implement fs_copy",
+            "instructions": "Implement `void fs_copy(FixStr *dst, const char *src)`. Copy at most 31 bytes from src, then NUL-terminate at `dst->data[31]`. Handles empty strings, exactly-31 strings, and overlong sources correctly.",
+            "starter_code": "typedef struct { char data[32]; } FixStr;\n\nvoid fs_copy(FixStr *dst, const char *src) {\n    /* TODO */\n}\n",
+            "kind": "function",
+            "harness": "#include <stdio.h>\n#include <string.h>\n#include \"learner.c\"\nint main(void) {\n    int f = 0;\n    FixStr s;\n    fs_copy(&s, \"hello\");\n    if (strcmp(s.data, \"hello\") != 0) { printf(\"FAIL short\\n\"); f++; }\n\n    char exact[32];\n    for (int i = 0; i < 31; i++) exact[i] = 'a' + (i % 26);\n    exact[31] = '\\0';\n    fs_copy(&s, exact);\n    if (strcmp(s.data, exact) != 0) { printf(\"FAIL exactly-31\\n\"); f++; }\n    if (s.data[31] != '\\0') { printf(\"FAIL not NUL-terminated on exact-31\\n\"); f++; }\n\n    fs_copy(&s, \"this string is definitely longer than thirty one characters\");\n    if (strlen(s.data) != 31) { printf(\"FAIL overlong len=%zu\\n\", strlen(s.data)); f++; }\n    if (s.data[31] != '\\0') { printf(\"FAIL overlong not NUL-terminated\\n\"); f++; }\n    if (strncmp(s.data, \"this string is definitely longer \", 31) != 0) { printf(\"FAIL overlong prefix\\n\"); f++; }\n\n    fs_copy(&s, \"\");\n    if (s.data[0] != '\\0') { printf(\"FAIL empty\\n\"); f++; }\n\n    if (!f) printf(\"ALL PASS\\n\");\n    return f ? 1 : 0;\n}\n",
+            "static_hints": [
+              "Stop at 31 characters copied; always write the terminator at index `i` (or at `31`).",
+              "Be sure the test for 'overlong' still keeps `data[31] == '\\0'`."
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "unit_id": "w0u1",
+      "lessons": [
+        {
+          "id": "w0u1l1",
+          "title": "Vectors: Add, Subtract, Scale",
+          "theory": "A `vec3` is just three floats. Almost everything in 3D graphics is a vector: positions, directions, velocities, face normals, and even color (where you can usually skip the w).\n\nVector add composes displacements: walking north for 3 meters and east for 4 meters puts you 3 east and 4 north from where you started. Scaling stretches a vector — a negative scale flips it.",
+          "worked_example": {
+            "title": "Wind, then thrust, then a missile launch",
+            "code": "typedef struct { float x, y, z; } vec3;\n\nstatic vec3 vec3_add(vec3 a, vec3 b) { return (vec3){a.x + b.x, a.y + b.y, a.z + b.z}; }\nstatic vec3 vec3_sub(vec3 a, vec3 b) { return (vec3){a.x - b.x, a.y - b.y, a.z - b.z}; }\nstatic vec3 vec3_scale(vec3 v, float s) { return (vec3){v.x * s, v.y * s, v.z * s}; }\n\nint main(void) {\n    vec3 wind   = {1, 0, 0};\n    vec3 thrust = {0, 0, 5};\n    vec3 v = vec3_add(wind, thrust);          // {1, 0, 5}\n    vec3 missile_pos = {0, 0, 0};\n    missile_pos = vec3_add(missile_pos, vec3_scale(v, 2.0f));\n    printf(\"%.1f %.1f %.1f\\n\", missile_pos.x, missile_pos.y, missile_pos.z);\n}",
+            "explanation": "Notice compound literal `(vec3){...}` — a clean C99 way to return a struct from a function. Every op is a few multiplies; a million of them per frame is nothing."
+          },
+          "practice": [
+            {"q": "Compute (1,2,3) + (4,-1,2).", "choices": ["(5, 1, 5)", "(5, -3, 9)", "(-3, 3, 1)"], "answer": 0, "explanation": "Componentwise add: 1+4=5, 2+(-1)=1, 3+2=5."},
+            {"q": "Geometrically, what does 2 * v represent?", "choices": ["Same direction, twice the magnitude", "Perpendicular vector", "Inverse direction"], "answer": 0, "explanation": "Scaling stretches a vector. (Scale by 0 produces the zero vector.)"}
+          ],
+          "checkpoint": {
+            "id": "w0u1l1c",
+            "title": "Implement vector add/sub/scale",
+            "instructions": "Implement `vec3_add`, `vec3_sub`, `vec3_scale`.",
+            "starter_code": "typedef struct { float x, y, z; } vec3;\n\nvec3 vec3_add(vec3 a, vec3 b) { /* TODO */ }\nvec3 vec3_sub(vec3 a, vec3 b) { /* TODO */ }\nvec3 vec3_scale(vec3 v, float s) { /* TODO */ }\n",
+            "kind": "function",
+            "harness": "#include <math.h>\n#include <stdio.h>\n#include \"learner.c\"\nstatic int f = 0;\nstatic void chk(const char *n, vec3 got, vec3 exp) {\n    if (fabsf(got.x - exp.x) > 1e-4f || fabsf(got.y - exp.y) > 1e-4f || fabsf(got.z - exp.z) > 1e-4f) {\n        printf(\"FAIL %s got=(%f,%f,%f) exp=(%f,%f,%f)\\n\", n, got.x, got.y, got.z, exp.x, exp.y, exp.z);\n        f++;\n    }\n}\nint main(void) {\n    vec3 a = {1, 2, 3}, b = {4, -1, 2};\n    chk(\"add\", vec3_add(a, b), (vec3){5, 1, 5});\n    chk(\"sub\", vec3_sub(a, b), (vec3){-3, 3, 1});\n    chk(\"scale\", vec3_scale(a, 0.5f), (vec3){0.5f, 1.0f, 1.5f});\n    chk(\"scale_neg\", vec3_scale(b, -2.0f), (vec3){-8, 2, -4});\n    if (!f) printf(\"ALL PASS\\n\");\n    return f ? 1 : 0;\n}\n",
+            "static_hints": [
+              "Return compound literals: `(vec3){a.x + b.x, a.y + b.y, a.z + b.z}`.",
+              "Scaling a vector by 0 should return the zero vector — verify with `(vec3){0,0,0}`."
+            ]
+          }
+        },
+        {
+          "id": "w0u1l2",
+          "title": "Dot Product, Length, Normalize",
+          "theory": "The dot product `a·b = |a||b|cos θ` tells you how aligned two vectors are. If they are perpendicular the result is 0; if parallel in the same direction, it's the product of their magnitudes.\n\nLength is just the square root of the dot of a vector with itself. Normalize divides by length to produce a unit vector. The edge case is the zero vector: its length is 0, and dividing by it is undefined. Pick a policy and document it (we'll return the zero vector for safety).",
+          "worked_example": {
+            "title": "Are two NPCs facing each other?",
+            "code": "static float vec3_dot(vec3 a, vec3 b) { return a.x*b.x + a.y*b.y + a.z*b.z; }\n\nstatic float vec3_length(vec3 v) { return sqrtf(vec3_dot(v, v)); }\n\nstatic vec3 vec3_normalize(vec3 v) {\n    float L = vec3_length(v);\n    if (L < 1e-6f) return (vec3){0, 0, 0};\n    return (vec3){v.x / L, v.y / L, v.z / L};\n}",
+            "explanation": "We use the dot product for the squared length — cheaper than `x*x + y*y + z*y` written three times. The 1e-6 guard is the policy: 'return zero if too small to normalize'."
+          },
+          "practice": [
+            {"q": "What is the dot product of two perpendicular unit vectors?", "choices": ["0", "1", "-1"], "answer": 0, "explanation": "cos(90°) = 0, so the dot product is 0."},
+            {"q": "Why does normalizing the zero vector require a guard?", "choices": ["Division by zero is undefined", "The result would be a unit vector", "It is slower without the guard"], "answer": 0, "explanation": "Without the guard, `v / 0` is undefined behaviour. Pick a sentinel (here, the zero vector) and document it."}
+          ],
+          "checkpoint": {
+            "id": "w0u1l2c",
+            "title": "Implement dot, length, normalize",
+            "instructions": "Implement `vec3_dot`, `vec3_length`, `vec3_normalize`. For zero-length input, return 0 (scalar) or the zero vector (vec3).",
+            "starter_code": "typedef struct { float x, y, z; } vec3;\n\nfloat vec3_dot(vec3 a, vec3 b) { /* TODO */ }\nfloat vec3_length(vec3 v) { /* TODO */ }\nvec3 vec3_normalize(vec3 v) { /* TODO */ }\n",
+            "kind": "function",
+            "harness": "#include <math.h>\n#include <stdio.h>\n#include \"learner.c\"\nstatic int f = 0;\nstatic void chkv(const char *n, vec3 got, vec3 exp) {\n    if (fabsf(got.x - exp.x) > 1e-4f || fabsf(got.y - exp.y) > 1e-4f || fabsf(got.z - exp.z) > 1e-4f) {\n        printf(\"FAIL %s\\n\", n); f++;\n    }\n}\nstatic void chks(const char *n, double got, double exp) {\n    if (fabsf(got - exp) > 1e-3f) { printf(\"FAIL %s got=%f exp=%f\\n\", n, got, exp); f++; }\n}\nint main(void) {\n    vec3 a = {1, 2, 3}, b = {4, -1, 2}, c = {3, 4, 0};\n    chks(\"dot\", vec3_dot(a, b), 12.0);\n    chks(\"perp\", vec3_dot((vec3){1,0,0}, (vec3){0,1,0}), 0.0);\n    chks(\"length\", vec3_length(c), 5.0);\n    chkv(\"normalize\", vec3_normalize(c), (vec3){0.6f, 0.8f, 0.0f});\n    chkv(\"zero\", vec3_normalize((vec3){0, 0, 0}), (vec3){0, 0, 0});\n    if (!f) printf(\"ALL PASS\\n\");\n    return f ? 1 : 0;\n}\n",
+            "static_hints": [
+              "Length is `sqrtf(x*x + y*y + z*z)` (or `sqrtf(dot(v, v))`).",
+              "Use a tiny epsilon (1e-6) to avoid normalizing the zero vector."
+            ]
+          }
+        },
+        {
+          "id": "w0u1l3",
+          "title": "Cross Product & Normals",
+          "theory": "Given two 3D vectors `a` and `b`, their cross product `a × b` is a third vector perpendicular to both. The magnitude is `|a||b| sin θ` — the area of the parallelogram they span. Direction follows the right-hand rule; swap the operands and the result flips sign.\n\nWhy you care: triangle face normals (perpendicular to the surface), camera right vector, and torque all come straight from the cross product.",
+          "worked_example": {
+            "title": "Compute a triangle's surface normal",
+            "code": "static vec3 vec3_cross(vec3 a, vec3 b) {\n    return (vec3){\n        a.y*b.z - a.z*b.y,\n        a.z*b.x - a.x*b.z,\n        a.x*b.y - a.y*b.x,\n    };\n}\n\nstatic vec3 tri_normal(vec3 a, vec3 b, vec3 c) {\n    vec3 u = vec3_sub(b, a);\n    vec3 v = vec3_sub(c, a);\n    return vec3_normalize(vec3_cross(u, v));\n}",
+            "explanation": "The normal direction depends on the winding order: CCW vertices → normal points 'out' by convention. Lighting looks broken if you get this wrong on back faces."
+          },
+          "practice": [
+            {"q": "What is x̂ × ŷ in a right-handed coordinate system?", "choices": ["ẑ", "-ẑ", "x̂"], "answer": 0, "explanation": "Right-hand rule: fingers curl from x to y, thumb points to z."},
+            {"q": "What happens if you swap the operands of the cross product?", "choices": ["The result flips sign", "Same result", "Result is zero"], "answer": 0, "explanation": "Anti-commutative: a × b = -(b × a). Winding order matters for normals."}
+          ],
+          "checkpoint": {
+            "id": "w0u1l3c",
+            "title": "Implement cross product and triangle normal",
+            "instructions": "Implement `vec3_cross` and `vec3 tri_normal(vec3 a, vec3 b, vec3 c)` that returns the unit normal of triangle (a, b, c) assuming CCW winding.",
+            "starter_code": "typedef struct { float x, y, z; } vec3;\nvec3 vec3_sub(vec3 a, vec3 b) { return (vec3){a.x-b.x, a.y-b.y, a.z-b.z}; }\nvec3 vec3_normalize(vec3 v) {\n    float L = sqrtf(v.x*v.x + v.y*v.y + v.z*v.z);\n    if (L < 1e-6f) return (vec3){0,0,0};\n    return (vec3){v.x/L, v.y/L, v.z/L};\n}\nvec3 vec3_cross(vec3 a, vec3 b) { /* TODO */ }\nvec3 tri_normal(vec3 a, vec3 b, vec3 c) {\n    /* TODO: use cross of (b-a) and (c-a), then normalize */\n    return (vec3){0,0,0};\n}\n",
+            "kind": "function",
+            "harness": "#include <math.h>\n#include <stdio.h>\n#include \"learner.c\"\nstatic int f = 0;\nstatic void chkv(const char *n, vec3 got, vec3 exp) {\n    if (fabsf(got.x - exp.x) > 1e-4f || fabsf(got.y - exp.y) > 1e-4f || fabsf(got.z - exp.z) > 1e-4f) {\n        printf(\"FAIL %s got=(%f,%f,%f) exp=(%f,%f,%f)\\n\", n, got.x, got.y, got.z, exp.x, exp.y, exp.z); f++;\n    }\n}\nint main(void) {\n    chkv(\"basis\", vec3_cross((vec3){1,0,0}, (vec3){0,1,0}), (vec3){0,0,1});\n    chkv(\"swap\",  vec3_cross((vec3){0,1,0}, (vec3){1,0,0}), (vec3){0,0,-1});\n    chkv(\"tri\",   tri_normal((vec3){0,0,0}, (vec3){2,0,0}, (vec3){0,2,0}), (vec3){0,0,1});\n    chkv(\"tri_xz\", tri_normal((vec3){0,0,0}, (vec3){2,0,0}, (vec3){0,0,2}), (vec3){0,-1,0});\n    if (!f) printf(\"ALL PASS\\n\");\n    return f ? 1 : 0;\n}\n",
+            "static_hints": [
+              "Cross product: `a.y*b.z - a.z*b.y` for x, and the cyclic permutations.",
+              "Triangle normal: cross of edges `(b-a)` and `(c-a)`, then normalize."
+            ]
+          }
+        },
+        {
+          "id": "w0u1l4",
+          "title": "4x4 Matrices & Transforms",
+          "theory": "3x3 matrices can't express translation as a linear map, so we lift to 4x4 with a homogeneous w-coordinate. We will use the column-major convention (the one OpenGL uses): translation lives at `m[12]`, `m[13]`, `m[14]` (column 3, rows 0–2), and the upper-left 3x3 is the rotation/scale.\n\nA transform stack is just a product of matrices: `M = T * R * S` means *scale first*, *then rotate*, *then translate* (right-to-left in the column convention). We will only need identity and multiplication for now.",
+          "worked_example": {
+            "title": "Compose translation and scale",
+            "code": "typedef struct { float m[16]; } mat4;\n\nstatic mat4 mat4_identity(void) {\n    mat4 r = {0};\n    r.m[0]=r.m[5]=r.m[10]=r.m[15]=1.0f;\n    return r;\n}\n\nstatic mat4 mat4_mul(mat4 a, mat4 b) {\n    mat4 r;\n    for (int c = 0; c < 4; c++) {\n        for (int row = 0; row < 4; row++) {\n            r.m[c*4+row] = 0;\n            for (int k = 0; k < 4; k++) r.m[c*4+row] += a.m[k*4+row] * b.m[c*4+k];\n        }\n    }\n    return r;\n}",
+            "explanation": "`r.m[col*4 + row]` is the entry at (row, col) in column-major form. The inner loop is the textbook matrix multiply; it is cache-friendly enough at this size and shows up again when you write a real shader."
+          },
+          "practice": [
+            {"q": "Why do we need 4 coordinates for affine 3D transforms?", "choices": ["Translation is not a linear map in 3D, so we lift to 4x4", "3x3 can't multiply at all", "Convention only"], "answer": 0, "explanation": "Translation `(x,y,z) → (x+tx, y+ty, z+tz)` cannot be written as a 3x3 matrix-times-vector. Adding a w-coordinate and fixing w=1 lets us represent it as a 4x4."},
+            {"q": "In `M = T * R * S` (column-major), which is applied to a point first?", "choices": ["Scale, then rotation, then translation", "Translation first", "Order is irrelevant"], "answer": 0, "explanation": "Column-major means the rightmost transform is applied first to the point, then the next, and so on. Order matters."}
+          ],
+          "checkpoint": {
+            "id": "w0u1l4c",
+            "title": "Implement mat4_mul",
+            "instructions": "Implement `mat4_identity` and `mat4_mul` using the column-major convention shown above. The harness checks identity×X = X and T(10,0,0) × S(2) applied to point (1,2,3) yields (12, 4, 6).",
+            "starter_code": "typedef struct { float m[16]; } mat4;\n\nmat4 mat4_identity(void) { /* TODO */ }\nmat4 mat4_mul(mat4 a, mat4 b) { /* TODO */ }\n",
+            "kind": "function",
+            "harness": "#include <math.h>\n#include <stdio.h>\n#include \"learner.c\"\nstatic int f = 0;\nstatic int mat_equal(const mat4 *a, const mat4 *b, float tol) {\n    for (int i = 0; i < 16; i++) if (fabsf(a->m[i] - b->m[i]) > tol) return 0;\n    return 1;\n}\nint main(void) {\n    mat4 I = mat4_identity();\n    mat4 A = I;\n    A.m[0] = 3.0f; A.m[5] = 4.0f; A.m[10] = 5.0f; A.m[15] = 1.0f;\n    A.m[12] = 7.0f; A.m[13] = 8.0f; A.m[14] = 9.0f;\n\n    mat4 R = mat4_mul(I, A);\n    if (!mat_equal(&R, &A, 1e-4f)) { printf(\"FAIL identity * A\\n\"); f++; }\n\n    mat4 B = mat4_mul(A, I);\n    if (!mat_equal(&B, &A, 1e-4f)) { printf(\"FAIL A * identity\\n\"); f++; }\n\n    mat4 S = I; S.m[0] = 2.0f; S.m[5] = 2.0f; S.m[10] = 2.0f;\n    mat4 T = I; T.m[12] = 10.0f;\n    mat4 TS = mat4_mul(T, S);\n    mat4 exp = I; exp.m[0] = exp.m[5] = exp.m[10] = 2.0f; exp.m[12] = 10.0f;\n    if (!mat_equal(&TS, &exp, 1e-4f)) { printf(\"FAIL T*S\\n\"); f++; }\n\n    if (!f) printf(\"ALL PASS\\n\");\n    return f ? 1 : 0;\n}\n",
+            "static_hints": [
+              "Identity: set m[0], m[5], m[10], m[15] to 1; everything else to 0.",
+              "Mul: `r[col*4 + row] = sum_k a[k*4 + row] * b[col*4 + k]`."
+            ]
+          }
+        },
+        {
+          "id": "w0u1l5",
+          "title": "Yaw, Pitch & Camera Forward",
+          "theory": "Spherical-to-Cartesian is the most common conversion in a 3D game: given a yaw (rotation around the world up axis) and a pitch (elevation), produce a unit forward vector.\n\nWe will use this exact convention (documented in code): at yaw=0, pitch=0 the camera looks down the -Z axis. Positive yaw rotates left (toward -X), positive pitch tilts up. Pitch is clamped to keep `cos(pitch)` from going to zero.\n\nFormula:\n  forward.x = -sin(yaw) * cos(pitch)\n  forward.y =  sin(pitch)\n  forward.z = -cos(yaw) * cos(pitch)",
+          "worked_example": {
+            "title": "Mouse delta into a look direction",
+            "code": "typedef struct { float x, y, z; } vec3;\n\nstatic vec3 forward_from_yaw_pitch(float yaw, float pitch) {\n    float cy = cosf(yaw),  sy = sinf(yaw);\n    float cp = cosf(pitch), sp = sinf(pitch);\n    return (vec3){ -sy * cp, sp, -cy * cp };\n}\n\nstatic void apply_mouse_delta(float *yaw, float *pitch, float dx, float dy, float sens) {\n    *yaw   += dx * sens;\n    *pitch += dy * sens;\n    if (*pitch >  1.5533f) *pitch =  1.5533f;  // ~89°\n    if (*pitch < -1.5533f) *pitch = -1.5533f;\n}",
+            "explanation": "The clamp keeps `cos(pitch)` from approaching 0, which would make the forward vector flip wildly as the player tries to look straight up."
+          },
+          "practice": [
+            {"q": "Why is pitch clamped?", "choices": ["To avoid gimbal-like flip when cos(pitch) → 0", "The sine function overflows", "The yaw axis breaks"], "answer": 0, "explanation": "At pitch=±90°, cos=0 and small mouse motion produces huge direction changes. Clamping to ~±89° is the standard fix."},
+            {"q": "At yaw=0, pitch=0, what is the forward vector in this convention?", "choices": ["(0, 0, -1)", "(1, 0, 0)", "(0, 1, 0)"], "answer": 0, "explanation": "Looking down -Z is the OpenGL/Raylib default. Yaw rotates left (toward -X), pitch tilts up (+Y)."}
+          ],
+          "checkpoint": {
+            "id": "w0u1l5c",
+            "title": "Implement forward_from_yaw_pitch",
+            "instructions": "Implement `vec3 forward_from_yaw_pitch(float yaw, float pitch)` with the formula shown above.",
+            "starter_code": "typedef struct { float x, y, z; } vec3;\n\nvec3 forward_from_yaw_pitch(float yaw, float pitch) {\n    /* TODO */\n    return (vec3){0, 0, -1};\n}\n",
+            "kind": "function",
+            "harness": "#include <math.h>\n#include <stdio.h>\n#include \"learner.c\"\nstatic int f = 0;\nstatic void chkv(const char *n, vec3 got, vec3 exp) {\n    if (fabsf(got.x - exp.x) > 1e-4f || fabsf(got.y - exp.y) > 1e-4f || fabsf(got.z - exp.z) > 1e-4f) {\n        printf(\"FAIL %s got=(%f,%f,%f) exp=(%f,%f,%f)\\n\", n, got.x, got.y, got.z, exp.x, exp.y, exp.z); f++;\n    }\n}\nint main(void) {\n    const float PI = 3.14159265f;\n    chkv(\"zero\", forward_from_yaw_pitch(0, 0), (vec3){0, 0, -1});\n    chkv(\"yaw_pi_2\", forward_from_yaw_pitch(PI/2, 0), (vec3){-1, 0, 0});\n    chkv(\"pitch_pi_2\", forward_from_yaw_pitch(0, PI/2), (vec3){0, 1, 0});\n    chkv(\"yaw_pi\", forward_from_yaw_pitch(PI, 0), (vec3){0, 0, 1});\n    chkv(\"both\", forward_from_yaw_pitch(PI/4, PI/4), (vec3){-0.5f, sqrtf(2)/2, -0.5f});\n    if (!f) printf(\"ALL PASS\\n\");\n    return f ? 1 : 0;\n}\n",
+            "static_hints": [
+              "forward.x = -sin(yaw) * cos(pitch); forward.y = sin(pitch); forward.z = -cos(yaw) * cos(pitch).",
+              "If you see huge numbers, you probably forgot the cos(pitch) factor on the horizontal components."
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "unit_id": "w0u2",
+      "lessons": [
+        {
+          "id": "w0u2l1",
+          "title": "Derivatives as Rates of Change",
+          "theory": "A derivative is a rate of change. Given a position function y(t), the instantaneous velocity is `dy/dt`; numerically, we approximate it with finite differences: `(y[i+1] - y[i]) / dt`.\n\nThis comes up constantly: estimating speed from logged positions, reading velocity from mouse motion, computing a derivative of any per-frame scalar. The error is `O(dt)` for forward differences and `O(dt²)` for central differences — but central needs a value on both sides of i, so we use forward at the boundary.",
+          "worked_example": {
+            "title": "Velocity from a recorded position log",
+            "code": "static void finite_diff(const float *y, int n, float dt, float *out) {\n    if (n == 0) return;\n    for (int i = 0; i < n - 1; i++) out[i] = (y[i+1] - y[i]) / dt;\n    out[n-1] = (y[n-1] - y[n-2]) / dt;   /* one-sided at the end */\n}\n\nint main(void) {\n    float y[5] = {0, 1, 2, 3, 4};   /* y = t, dt = 1 */\n    float v[5];\n    finite_diff(y, 5, 1.0f, v);\n    /* v should be 1 everywhere */\n}",
+            "explanation": "For perfectly linear data, forward differences are exact. For curved data, the truncation error scales with dt; the rule of thumb is 'small enough that you don't care, large enough that float roundoff doesn't bite.'"
+          },
+          "practice": [
+            {"q": "What is the unit of `(y[i+1] - y[i]) / dt` if y is in meters and t in seconds?", "choices": ["Meters per second", "Meters", "Seconds"], "answer": 0, "explanation": "Differences of y are meters; differences of t are seconds. The ratio is m/s."},
+            {"q": "Why is too-small dt dangerous with float?", "choices": ["Roundoff: subtracting two close numbers loses precision", "Float can't represent dt", "Stack overflow"], "answer": 0, "explanation": "Catastrophic cancellation: `a - b` where a ≈ b is mostly noise. With dt=1e-7, the velocity estimate can be 100% off."}
+          ],
+          "checkpoint": {
+            "id": "w0u2l1c",
+            "title": "Implement finite_diff",
+            "instructions": "Implement `void finite_diff(const float *y, int n, float dt, float *out)`. Forward difference for `i < n-1`, one-sided at `i = n-1`.",
+            "starter_code": "void finite_diff(const float *y, int n, float dt, float *out) {\n    /* TODO */\n}\n",
+            "kind": "function",
+            "harness": "#include <math.h>\n#include <stdio.h>\n#include \"learner.c\"\nint main(void) {\n    int f = 0;\n    float y[5] = {0, 1, 2, 3, 4}, v[5], exp[5] = {1, 1, 1, 1, 1};\n    finite_diff(y, 5, 1.0f, v);\n    for (int i = 0; i < 5; i++) if (fabsf(v[i] - exp[i]) > 1e-4f) { printf(\"FAIL linear i=%d v=%f\\n\", i, v[i]); f++; }\n\n    float y2[4] = {0, 1, 4, 9}, v2[4];          /* y = t^2, dt=1 */\n    float e2[4] = {1, 3, 5, 5};                 /* derivative is 2t; one-sided at end */\n    finite_diff(y2, 4, 1.0f, v2);\n    for (int i = 0; i < 4; i++) if (fabsf(v2[i] - e2[i]) > 1e-3f) { printf(\"FAIL quad i=%d v=%f exp=%f\\n\", i, v2[i], e2[i]); f++; }\n\n    if (f) return 1;\n    printf(\"ALL PASS\\n\");\n    return 0;\n}\n",
+            "static_hints": [
+              "For i in [0, n-1): out[i] = (y[i+1] - y[i]) / dt.",
+              "Last entry: use (y[n-1] - y[n-2]) / dt — backward difference."
+            ]
+          }
+        },
+        {
+          "id": "w0u2l2",
+          "title": "Integration & Newton's Laws",
+          "theory": "Integration is the inverse of differentiation: accumulate rates of change into a state. Newton's second law in code terms: `a = F / m`, then update velocity and position. The order matters — semi-implicit Euler (velocity first, then position) is *much* more stable than the naive order, and is the default in almost every real-time physics integrator.\n\nThis is the same operation we did in the data-oriented unit, just with explicit force handling.",
+          "worked_example": {
+            "title": "A free body under one force",
+            "code": "typedef struct { float m, x, y, vx, vy; } Body;\n\nstatic void body_apply_force(Body *b, float fx, float fy, float dt) {\n    /* Semi-implicit Euler: update v first, then x uses the new v. */\n    b->vx += (fx / b->m) * dt;\n    b->vy += (fy / b->m) * dt;\n    b->x  += b->vx * dt;\n    b->y  += b->vy * dt;\n}",
+            "explanation": "Stable across the same time step sizes that would let the naive order gain energy and eventually blow up."
+          },
+          "practice": [
+            {"q": "What does `a = F / m` tell us?", "choices": ["Force per unit mass is acceleration", "Mass times velocity", "Force minus mass"], "answer": 0, "explanation": "Newton's second law. A heavier body accelerates less for the same force."},
+            {"q": "Why update velocity first (semi-implicit Euler)?", "choices": ["Significantly better energy behavior than the naive order", "Required by the language", "Random"], "answer": 0, "explanation": "The naive order `x += v*dt; v += a*dt` is mathematically equivalent for one step but lets systems gain energy over many steps."}
+          ],
+          "checkpoint": {
+            "id": "w0u2l2c",
+            "title": "Implement body_apply_force",
+            "instructions": "Implement `body_apply_force`. Update vx/vy first using `F/m * dt`, then update x/y using the new velocity.",
+            "starter_code": "typedef struct { float m, x, y, vx, vy; } Body;\n\nvoid body_apply_force(Body *b, float fx, float fy, float dt) {\n    /* TODO: semi-implicit Euler */\n}\n",
+            "kind": "function",
+            "harness": "#include <math.h>\n#include <stdio.h>\n#include \"learner.c\"\nint main(void) {\n    int f = 0;\n    Body b = {2.0f, 0, 0, 0, 0};\n    body_apply_force(&b, 4.0f, -19.6f, 0.1f);\n    if (fabsf(b.vx - 0.2f) > 1e-4f) { printf(\"FAIL vx=%f\\n\", b.vx); f++; }\n    if (fabsf(b.vy - (-0.98f)) > 1e-4f) { printf(\"FAIL vy=%f\\n\", b.vy); f++; }\n    if (fabsf(b.x - 0.02f) > 1e-4f) { printf(\"FAIL x=%f\\n\", b.x); f++; }\n    if (fabsf(b.y - (-0.098f)) > 1e-4f) { printf(\"FAIL y=%f\\n\", b.y); f++; }\n\n    Body z = {1.0f, 5, 7, 0, 0};\n    body_apply_force(&z, 0, 0, 0.016f);\n    if (z.x != 5 || z.y != 7) { printf(\"FAIL zero force changed pos\\n\"); f++; }\n\n    if (!f) printf(\"ALL PASS\\n\");\n    return f ? 1 : 0;\n}\n",
+            "static_hints": [
+              "v += (F / m) * dt first, then x += v * dt.",
+              "Zero force should leave the body at rest at its position (vx,vy both zero, x,y unchanged)."
+            ]
+          }
+        },
+        {
+          "id": "w0u2l3",
+          "title": "Euler vs Verlet vs RK4",
+          "theory": "Three integrators you'll see in the wild:\n\n- **Euler (semi-implicit)**: cheap, decent, can gain energy on stiff systems.\n- **Verlet**: position-based; `x_{n+1} = 2 x_n - x_{n-1} + a dt²`. Symplectic, stable, great for spring and orbital systems. Velocity is recovered as `(x_n - x_{n-1}) / dt`.\n- **RK4**: four evaluations per step, fourth-order accurate. Best for stiff accuracy; expensive and overkill for gameplay.\n\nBoss 0 asks you to use Verlet precisely because the explicit Euler version leaks enough energy that you'll see balls fly through the ceiling. Watch for it.",
+          "worked_example": {
+            "title": "Verlet step for a 1D position",
+            "code": "static void verlet_step(float *x, float *x_prev, float acc, float dt) {\n    float x_new = 2.0f * (*x) - (*x_prev) + acc * dt * dt;\n    *x_prev = *x;\n    *x = x_new;\n}\n\n/* Free fall test: x0 = 100, xp = 100, a = -9.8, dt = 0.1\n * After n steps: x_n = 100 + a*dt^2 * n*(n+1) / 2\n */",
+            "explanation": "Verlet with a constant acceleration has a *closed form* the harness can check exactly: `x_n = x_0 + a·dt²·n(n+1)/2`. Even though the algorithm is the discrete recurrence, we know the answer."
+          },
+          "practice": [
+            {"q": "Which integrator to reach for first in a typical game?", "choices": ["Semi-implicit Euler; switch to Verlet when energy leaks", "RK4 always", "Verlet always"], "answer": 0, "explanation": "Euler is dirt cheap and good enough for most gameplay physics. Verlet for springs/orbits where energy stability matters. RK4 only for stiff accuracy."},
+            {"q": "How is velocity extracted from Verlet's positions?", "choices": ["v ≈ (x - x_prev) / dt", "Stored separately", "Cannot be extracted"], "answer": 0, "explanation": "Verlet doesn't carry velocity explicitly; you approximate it from successive positions."}
+          ],
+          "checkpoint": {
+            "id": "w0u2l3c",
+            "title": "Implement verlet_step",
+            "instructions": "Implement `void verlet_step(float *x, float *x_prev, float acc, float dt)`. Compute `x_new = 2x - x_prev + a*dt²`, then set `x_prev = x` and `x = x_new`.",
+            "starter_code": "void verlet_step(float *x, float *x_prev, float acc, float dt) {\n    /* TODO */\n}\n",
+            "kind": "function",
+            "harness": "#include <math.h>\n#include <stdio.h>\n#include \"learner.c\"\nint main(void) {\n    int f = 0;\n    float x = 100.0f, xp = 100.0f;\n    const float a = -9.8f, dt = 0.1f;\n    for (int n = 1; n <= 5; n++) {\n        verlet_step(&x, &xp, a, dt);\n        double expected = 100.0 + a * dt * dt * n * (n + 1) / 2.0;\n        if (fabsf(x - expected) > 1e-3f) { printf(\"FAIL step n=%d x=%f exp=%f\\n\", n, x, expected); f++; }\n        if (fabsf(xp - (100.0 + a * dt * dt * (n-1) * n / 2.0)) > 1e-3f) { printf(\"FAIL x_prev n=%d xp=%f\\n\", n, xp); f++; }\n    }\n    if (!f) printf(\"ALL PASS\\n\");\n    return f ? 1 : 0;\n}\n",
+            "static_hints": [
+              "`x_new = 2*x - x_prev + a*dt*dt` — that's the whole algorithm.",
+              "After computing x_new, assign x_prev = x (the *old* x), then x = x_new."
+            ]
+          }
+        },
+        {
+          "id": "w0u2l4",
+          "title": "Lambert's Cosine Law",
+          "theory": "Diffuse lighting — the dim glow of a matte surface under a light — follows `I = intensity * max(0, n·l)`. The dot product is the cosine of the angle between the surface normal `n` and the direction to the light `l` (both unit vectors). A surface directly facing the light is fully lit; one edge-on is unlit; one facing away is in shadow.\n\nThis is the foundation of every realistic lighting model and we'll reuse it heavily in the shaders unit.",
+          "worked_example": {
+            "title": "Two surfaces, one light",
+            "code": "typedef struct { float x, y, z; } vec3;\n\nstatic vec3 vec3_normalize(vec3 v) {\n    float L = sqrtf(v.x*v.x + v.y*v.y + v.z*v.z);\n    if (L < 1e-6f) return (vec3){0, 0, 0};\n    return (vec3){v.x/L, v.y/L, v.z/L};\n}\nstatic float vec3_dot(vec3 a, vec3 b) { return a.x*b.x + a.y*b.y + a.z*b.z; }\n\nstatic float lambert(vec3 n, vec3 l, float intensity) {\n    float d = vec3_dot(n, l);\n    if (d < 0) d = 0;\n    return intensity * d;\n}",
+            "explanation": "Clamp negatives to 0 — a surface whose normal points away from the light should not go negative (it just goes black)."
+          },
+          "practice": [
+            {"q": "If the light is directly overhead on a flat ground (n=(0,1,0), l=(0,1,0)), the result is:", "choices": ["intensity * 1.0", "intensity * 0.5", "0"], "answer": 0, "explanation": "Parallel vectors: dot is 1."},
+            {"q": "If the light is behind the surface (n=(0,1,0), l=(0,-1,0)), the result is:", "choices": ["0 (clamped)", "-intensity", "intensity"], "answer": 0, "explanation": "Negative dot is clamped to 0 in the diffuse model."}
+          ],
+          "checkpoint": {
+            "id": "w0u2l4c",
+            "title": "Implement lambert",
+            "instructions": "Implement `float lambert(vec3 n, vec3 l, float intensity)` that returns `intensity * max(0, dot(n, l))`.",
+            "starter_code": "typedef struct { float x, y, z; } vec3;\nfloat vec3_dot(vec3 a, vec3 b) { return a.x*b.x + a.y*b.y + a.z*b.z; }\n\nfloat lambert(vec3 n, vec3 l, float intensity) {\n    /* TODO */\n    return 0.0f;\n}\n",
+            "kind": "function",
+            "harness": "#include <math.h>\n#include <stdio.h>\n#include \"learner.c\"\nint main(void) {\n    int f = 0;\n    float v;\n    v = lambert((vec3){0,1,0}, (vec3){0,1,0}, 2.0f);              if (fabsf(v - 2.0f) > 1e-4f) { printf(\"FAIL head-on\\n\"); f++; }\n    v = lambert((vec3){0,1,0}, (vec3){1,0,0}, 2.0f);              if (fabsf(v - 0.0f) > 1e-4f) { printf(\"FAIL side\\n\"); f++; }\n    v = lambert((vec3){0,1,0}, (vec3){0,-1,0}, 2.0f);             if (fabsf(v - 0.0f) > 1e-4f) { printf(\"FAIL behind\\n\"); f++; }\n    v = lambert((vec3){0,1,0}, (vec3){0, 0.7071f, 0.7071f}, 1.0f); if (fabsf(v - 0.7071f) > 1e-3f) { printf(\"FAIL 45\\n\"); f++; }\n    if (!f) printf(\"ALL PASS\\n\");\n    return f ? 1 : 0;\n}\n",
+            "static_hints": [
+              "Compute the dot, clamp negatives to 0, multiply by intensity.",
+              "Don't forget the `max(0, ...)` — without it, your surface glows when it shouldn't."
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "unit_id": "w0u3",
+      "lessons": [
+        {
+          "id": "w0u3l1",
+          "title": "Dynamic Arrays",
+          "theory": "Fixed-size arrays are easy and fast but don't grow. A dynamic array amortizes `O(1)` appends by doubling capacity: when full, allocate 2× and copy. The cost of one reallocation is spread across all the cheap pushes since the last one.\n\nTwo things to remember: (1) realloc invalidates old pointers — never cache a `&arr.data[i]` across a push; (2) if you store the array by pointer in many places, give out a *new* pointer to consumers after growth.",
+          "worked_example": {
+            "title": "A typed dynamic array of ints",
+            "code": "typedef struct { int *data; int len; int cap; } IntArr;\n\nstatic int da_push(IntArr *a, int v) {\n    if (a->len == a->cap) {\n        int new_cap = a->cap ? a->cap * 2 : 4;\n        int *nd = realloc(a->data, new_cap * sizeof(int));\n        if (!nd) return -1;\n        a->data = nd;\n        a->cap = new_cap;\n    }\n    a->data[a->len++] = v;\n    return 0;\n}",
+            "explanation": "Initial cap of 4 covers small use cases; doubling covers up to 2^N without further realloc until the cap grows large."
+          },
+          "practice": [
+            {"q": "Why is doubling capacity `O(1)` amortized?", "choices": ["Each push is constant except for the rare doubling, which averages out", "The compiler removes the cost", "Doubling is constant-time"], "answer": 0, "explanation": "Total copies over N pushes is 1+2+4+...+N/2 < 2N, so amortized O(1)."},
+            {"q": "After realloc, what happens to old `&a->data[i]` pointers?", "choices": ["They are invalidated (data may have moved)", "They still point to the same memory", "They become read-only"], "answer": 0, "explanation": "Realloc may move the array. Re-fetch pointers after any push that grew the array."}
+          ],
+          "checkpoint": {
+            "id": "w0u3l1c",
+            "title": "Implement da_push",
+            "instructions": "Implement `int da_push(IntArr *a, int v)`. Grow by 2× when full (initial cap 4 from NULL), append the value, return 0/-1.",
+            "starter_code": "#include <stdlib.h>\ntypedef struct { int *data; int len; int cap; } IntArr;\n\nint da_push(IntArr *a, int v) {\n    /* TODO */\n    return -1;\n}\n",
+            "kind": "function",
+            "harness": "#include <stdio.h>\n#include <stdlib.h>\n#include \"learner.c\"\nint main(void) {\n    int f = 0;\n    IntArr a = {0, 0, 0};\n    for (int i = 0; i < 1000; i++) if (da_push(&a, i)) { printf(\"FAIL alloc\\n\"); f++; break; }\n    if (a.len != 1000) { printf(\"FAIL len\\n\"); f++; }\n    if (a.cap < 1000) { printf(\"FAIL cap\\n\"); f++; }\n    for (int i = 0; i < a.len; i++) if (a.data[i] != i) { printf(\"FAIL content i=%d\\n\", i); f++; break; }\n    free(a.data);\n    if (!f) printf(\"ALL PASS\\n\");\n    return f ? 1 : 0;\n}\n",
+            "static_hints": [
+              "If `a->cap == 0`, start at cap 4. Otherwise double.",
+              "If `realloc` returns NULL, do *not* overwrite `a->data` — return -1."
+            ]
+          }
+        },
+        {
+          "id": "w0u3l2",
+          "title": "Hash Maps (Open Addressing)",
+          "theory": "A hash table maps a key to a value in average O(1). The simplest layout is *open addressing*: an array of slots, each with a key, a value, and a `used` flag. You hash the key, look in the slot at `hash & (cap-1)`, and walk forward until you find the key (hit) or an empty slot (miss).\n\nThe catch: deletions need *tombstones* to keep the probe chain intact. And keep the load factor under ~0.7 to keep the walk short.",
+          "worked_example": {
+            "title": "Get with linear probing",
+            "code": "#define MAP_CAP 64\ntypedef struct { char key[64]; int value; int used; } Entry;\ntypedef struct { Entry entries[MAP_CAP]; } Map;\n\nstatic uint32_t hash_str(const char *s) {\n    /* FNV-1a 32-bit — see starter. */\n    uint32_t h = 2166136261u;\n    while (*s) { h ^= (uint8_t)*s++; h *= 16777619u; }\n    return h;\n}\n\nstatic int map_get(const Map *m, const char *key, int *out) {\n    uint32_t i = hash_str(key) & (MAP_CAP - 1);\n    for (int step = 0; step < MAP_CAP; step++) {\n        const Entry *e = &m->entries[(i + step) & (MAP_CAP - 1)];\n        if (!e->used) return 0;\n        if (strcmp(e->key, key) == 0) { *out = e->value; return 1; }\n    }\n    return 0;\n}",
+            "explanation": "The harness provides the FNV-1a hash, the Entry layout, and `map_put` to set up test entries. You implement `map_get` only."
+          },
+          "practice": [
+            {"q": "Why keep load factor under ~0.7?", "choices": ["Probes get exponentially longer as the table fills", "The compiler warns above 0.7", "Hash collisions disappear below 0.7"], "answer": 0, "explanation": "Probing chains grow with load. Past 0.7 the table slows down dramatically; at 1.0 it stops working."},
+            {"q": "Why is deletion tricky in open addressing?", "choices": ["You must mark tombstones to preserve the probe chain", "You cannot delete", "The hash re-computes"], "answer": 0, "explanation": "Removing a slot entirely breaks the chain for keys further down. Tombstones mark the slot as 'previously used' so probing continues correctly."}
+          ],
+          "checkpoint": {
+            "id": "w0u3l2c",
+            "title": "Implement map_get",
+            "instructions": "Implement `int map_get(const Map *m, const char *key, int *out)` using linear probing. Returns 1 with `*out` set on hit, 0 on miss.",
+            "starter_code": "#include <stdint.h>\n#include <string.h>\n#define MAP_CAP 64\ntypedef struct { char key[64]; int value; int used; } Entry;\ntypedef struct { Entry entries[MAP_CAP]; } Map;\n\nuint32_t hash_str(const char *s) {\n    uint32_t h = 2166136261u;\n    while (*s) { h ^= (uint8_t)*s++; h *= 16777619u; }\n    return h;\n}\n\nint map_get(const Map *m, const char *key, int *out) {\n    /* TODO: probe from hash_str(key) & (MAP_CAP-1), walk forward */\n    return 0;\n}\n",
+            "kind": "function",
+            "harness": "#include <stdio.h>\n#include <string.h>\n#include \"learner.c\"\nint main(void) {\n    int f = 0;\n    Map m = {0};\n    strcpy(m.entries[hash_str(\"gold\") & 63].key, \"gold\");\n    m.entries[hash_str(\"gold\") & 63].value = 7;\n    m.entries[hash_str(\"gold\") & 63].used = 1;\n\n    int v;\n    if (!map_get(&m, \"gold\", &v) || v != 7) { printf(\"FAIL hit\\n\"); f++; }\n    if ( map_get(&m, \"silver\", &v))    { printf(\"FAIL miss\\n\"); f++; }\n\n    /* Now insert two entries that the harness forces to the same hash (impossible in practice),\n     * but we can simulate a probe: put \"alpha\" at hash(\"alpha\")&63, and put \"beta\" at the next slot. */\n    int slot = hash_str(\"alpha\") & 63;\n    strcpy(m.entries[slot].key, \"alpha\");\n    m.entries[slot].value = 1; m.entries[slot].used = 1;\n    if (map_get(&m, \"alpha\", &v) != 1 || v != 1) { printf(\"FAIL alpha\\n\"); f++; }\n\n    if (!f) printf(\"ALL PASS\\n\");\n    return f ? 1 : 0;\n}\n",
+            "static_hints": [
+              "Start at `hash_str(key) & (MAP_CAP - 1)` (CAP is a power of 2).",
+              "Walk `for (int step = 0; step < MAP_CAP; step++)` so you don't loop forever on a malformed table."
+            ]
+          }
+        },
+        {
+          "id": "w0u3l3",
+          "title": "Priority Queues (Binary Heap)",
+          "theory": "A binary heap is a near-complete binary tree stored in an array, with the rule that a parent is always better (smaller, for a min-heap) than its children. Insert is O(log n) via a 'sift up'. Pop-min is O(log n) via 'sift down'. A* pathfinding uses this as its frontier.\n\nFor an array index `i`, the parent is `(i - 1) / 2`, and the children are `2i + 1` and `2i + 2`.",
+          "worked_example": {
+            "title": "Sift up after push",
+            "code": "typedef struct { float prio[128]; int val[128]; int len; } MinHeap;\n\nstatic void swap(MinHeap *h, int a, int b) {\n    float tp = h->prio[a]; h->prio[a] = h->prio[b]; h->prio[b] = tp;\n    int   tv = h->val[a];  h->val[a]  = h->val[b];  h->val[b]  = tv;\n}\n\nstatic void heap_push(MinHeap *h, float prio, int val) {\n    int i = h->len++;\n    h->prio[i] = prio;\n    h->val[i]  = val;\n    while (i > 0) {\n        int p = (i - 1) / 2;\n        if (h->prio[p] <= h->prio[i]) break;\n        swap(h, i, p);\n        i = p;\n    }\n}",
+            "explanation": "The harness will pop everything after your pushes. If you implemented sift up correctly, the popped priorities come out in ascending order."
+          },
+          "practice": [
+            {"q": "What is the parent index of element i in a binary heap array?", "choices": ["(i - 1) / 2", "i / 2", "2 * i + 1"], "answer": 0, "explanation": "Children are 2i+1 and 2i+2; the parent is the inverse."},
+            {"q": "Why use a heap instead of a sorted array for an A* frontier?", "choices": ["Insertion is O(log n) instead of O(n)", "Heaps are smaller", "Sorted arrays are slower to read"], "answer": 0, "explanation": "A* inserts and pops constantly; sorted-array insert is O(n)."}
+          ],
+          "checkpoint": {
+            "id": "w0u3l3c",
+            "title": "Implement heap_push",
+            "instructions": "Implement `void heap_push(MinHeap *h, float prio, int val)`. Place the new element at the end and sift up while it is smaller than its parent.",
+            "starter_code": "typedef struct { float prio[128]; int val[128]; int len; } MinHeap;\nstatic void swap(MinHeap *h, int a, int b) {\n    float tp = h->prio[a]; h->prio[a] = h->prio[b]; h->prio[b] = tp;\n    int   tv = h->val[a];  h->val[a]  = h->val[b];  h->val[b]  = tv;\n}\n\nvoid heap_push(MinHeap *h, float prio, int val) {\n    /* TODO: append at h->prio[h->len]/h->val[h->len], then sift up */\n}\n",
+            "kind": "function",
+            "harness": "#include <stdio.h>\n#include \"learner.c\"\nstatic int f = 0;\nstatic int heap_pop(MinHeap *h, float *p, int *v) {\n    if (h->len == 0) return 0;\n    *p = h->prio[0]; *v = h->val[0];\n    h->len--;\n    if (h->len > 0) {\n        h->prio[0] = h->prio[h->len]; h->val[0] = h->val[h->len];\n        int i = 0;\n        for (;;) {\n            int l = 2*i + 1, r = 2*i + 2, best = i;\n            if (l < h->len && h->prio[l] < h->prio[best]) best = l;\n            if (r < h->len && h->prio[r] < h->prio[best]) best = r;\n            if (best == i) break;\n            swap(h, i, best);\n            i = best;\n        }\n    }\n    return 1;\n}\nint main(void) {\n    MinHeap h = {0};\n    /* Push a shuffled sequence */\n    float seq[10] = {4.0f, 1.0f, 7.0f, 3.0f, 9.0f, 2.0f, 5.0f, 8.0f, 6.0f, 0.0f};\n    for (int i = 0; i < 10; i++) heap_push(&h, seq[i], i);\n    float last = -1.0f;\n    for (int i = 0; i < 10; i++) {\n        float p; int v;\n        if (!heap_pop(&h, &p, &v)) { printf(\"FAIL empty\\n\"); f++; break; }\n        if (p < last - 1e-4f) { printf(\"FAIL order\\n\"); f++; break; }\n        last = p;\n    }\n    if (!f) printf(\"ALL PASS\\n\");\n    return f ? 1 : 0;\n}\n",
+            "static_hints": [
+              "Append at the end, then loop: while i > 0 and prio[i] < prio[(i-1)/2], swap with parent.",
+              "Don't forget `h->len++` when you append."
+            ]
+          }
+        },
+        {
+          "id": "w0u3l4",
+          "title": "Graphs, BFS & Big-O",
+          "theory": "A grid is a graph. A navmesh is a graph. A scene graph is a graph. Breadth-first search visits nodes in layers, finds shortest paths in unweighted graphs, and is your first escape from `O(n²)` pairwise checks.\n\nStored as *compressed sparse row* (CSR) — two arrays, `offsets[]` and `nbrs[]` — it is the most cache-friendly representation we have for static graphs.",
+          "worked_example": {
+            "title": "CSR adjacency and BFS",
+            "code": "typedef struct { int n; const int *offsets; const int *nbrs; } Graph;\n\nstatic int bfs_dist(const Graph *g, int start, int target) {\n    if (start == target) return 0;\n    if (start < 0 || start >= g->n) return -1;\n\n    char *seen = calloc((size_t)g->n, 1);\n    int  *dist = malloc((size_t)g->n * sizeof(int));\n    int  *q    = malloc((size_t)g->n * sizeof(int));\n    if (!seen || !dist || !q) { free(seen); free(dist); free(q); return -1; }\n\n    int head = 0, tail = 0;\n    seen[start] = 1; dist[start] = 0;\n    q[tail++] = start;\n    while (head < tail) {\n        int u = q[head++];\n        for (int k = g->offsets[u]; k < g->offsets[u+1]; k++) {\n            int v = g->nbrs[k];\n            if (seen[v]) continue;\n            seen[v] = 1;\n            dist[v] = dist[u] + 1;\n            if (v == target) { free(seen); free(dist); free(q); return dist[v]; }\n            q[tail++] = v;\n        }\n    }\n    free(seen); free(dist); free(q);\n    return -1;\n}",
+            "explanation": "A queue array is enough — no linked list needed. We mark `seen` early to avoid pushing a node twice."
+          },
+          "practice": [
+            {"q": "10,000 entities with pairwise collision checks per frame is roughly 50,000,000 checks. Why bad?", "choices": ["Quadratic in entity count — most games pair this with spatial partitioning", "The number is too large to print", "The compiler can't optimize"], "answer": 0, "explanation": "O(n²) is the cost you pay for naive pairwise tests. Spatial partitioning (uniform grid, then octree) brings it down to O(n)."},
+            {"q": "BFS finds shortest paths in which kind of graph?", "choices": ["Unweighted", "Weighted", "Both"], "answer": 0, "explanation": "BFS counts edges, not edge weights. For weighted graphs you need Dijkstra or A*."}
+          ],
+          "checkpoint": {
+            "id": "w0u3l4c",
+            "title": "Implement bfs_dist",
+            "instructions": "Implement `int bfs_dist(const Graph *g, int start, int target)` returning the hop distance, or -1 if `target` is unreachable. Use a malloc'd visited/queue arrays; free them before returning.",
+            "starter_code": "typedef struct { int n; const int *offsets; const int *nbrs; } Graph;\n\nint bfs_dist(const Graph *g, int start, int target) {\n    /* TODO */\n    return -1;\n}\n",
+            "kind": "function",
+            "harness": "#include <stdio.h>\n#include <stdlib.h>\n#include \"learner.c\"\nint main(void) {\n    /* Chain 0-1-2-3-4, plus a side edge 2-5 */\n    int off_a[6] = {0, 1, 2, 3, 4, 5};\n    int off_b[6] = {1, 2, 3, 4, 5, 5};\n    int nbrs[5]  = {1, 2, 3, 4, 5};\n    /* offsets: row i has nbrs[off_a[i]..off_b[i]) */\n    int off[6]  = {0, 1, 2, 4, 5, 5};   /* 0->1, 1->2, 2->3,5, 3->4, 4->{} */\n    int adj[5]  = {1, 2, 3, 5, 4};\n    Graph g = {5, off, adj};\n    int f = 0;\n    if (bfs_dist(&g, 0, 4) != 3) { printf(\"FAIL 0->4\\n\"); f++; }\n    if (bfs_dist(&g, 4, 0) != 5) { printf(\"FAIL 4->0 (only via 3-2-1-0... 4 hops, not 5)\\n\"); f++; }\n    if (bfs_dist(&g, 0, 0) != 0) { printf(\"FAIL self\\n\"); f++; }\n    if (bfs_dist(&g, 0, 100) != -1) { printf(\"FAIL out-of-bounds\\n\"); f++; }\n    if (!f) printf(\"ALL PASS\\n\");\n    return f ? 1 : 0;\n}\n",
+            "static_hints": [
+              "Allocate a visited array and a queue. Mark the start, push it, and pop nodes until the queue is empty.",
+              "Remember: `g->offsets[u+1] - g->offsets[u]` is the degree; iterate from `g->offsets[u]` to `g->offsets[u+1]`."
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "unit_id": "w0b0",
+      "lessons": [
+        {
+          "id": "w0b0l1",
+          "title": "Boss 0 — CLI Particle Sim",
+          "theory": "This is the world-0 capstone. The starter implements explicit Euler integration for 3 balls in a 100×100 box, with gravity, wall bounces, and per-tick printing. Your job: replace the Euler body with a Verlet step and watch the simulation become stable — Euler leaks energy, balls slowly escape the box, the ceiling stops being a ceiling. Verlet doesn't.\n\nThe output must be deterministic (same input → same output every run). All constants are fixed in the starter; the only free parameter is your integration scheme.\n\nWhat gets checked:\n- exactly 600 lines of `T <tick> <id> <x> <y>`\n- every position is finite and inside [1, 99]\n- no ball exceeds its starting height by more than 2 (energy leak detection)\n- balls actually move (catches a no-op step)\n- two consecutive runs produce byte-identical stdout (determinism)\n\nThe starter has comments showing exactly which lines to replace.",
+          "worked_example": {
+            "title": "Velocity Verlet (constant acceleration) with bounce",
+            "code": "static void verlet_step(Ball *b) {\n    b->x  += b->vx * DT + 0.5f * 0.0f * DT * DT;\n    b->y  += b->vy * DT + 0.5f * G * DT * DT;\n    b->vx += 0.0f * DT;\n    b->vy += G * DT;\n\n    if (b->x < R)      { b->x = R;     b->vx = -b->vx * REST; }\n    if (b->x > W - R)  { b->x = W - R; b->vx = -b->vx * REST; }\n    if (b->y < R)      { b->y = R;     b->vy = -b->vy * REST; }\n    if (b->y > H - R)  { b->y = H - R; b->vy = -b->vy * REST; }\n}",
+            "explanation": "With `ax = 0` and `ay = G`, velocity Verlet is exact for the linear part of the motion. The bounce is a hard reflect with restitution. The starter wires this into a `main` that loops 200 ticks and prints the trace."
+          },
+          "practice": [
+            {"q": "Why is Verlet preferred over explicit Euler for the boss sim?", "choices": ["Euler leaks energy; balls eventually escape the box", "Verlet is faster", "Verlet uses less memory"], "answer": 0, "explanation": "Explicit Euler's update order (x += v*dt; v += a*dt) introduces numerical error that grows as energy. Verlet is symplectic and energy-stable."},
+            {"q": "Why must the output be byte-identical between two runs?", "choices": ["Multiplayer replays, deterministic save states, debuggability", "Faster", "Required by the harness"], "answer": 0, "explanation": "Determinism is what lets a save file, replay, or netcode match across machines. Random numbers or uninitialized memory break it instantly."}
+          ],
+          "checkpoint": {
+            "id": "w0b0l1c",
+            "title": "Implement verlet_step and pass the boss",
+            "instructions": "Replace the body of `verlet_step` with a Verlet update. Use the constants from the starter. After 200 ticks, all 600 lines must be valid, positions inside the box, no energy gain, and two runs identical.\n\nThe starter has explicit comments marking which lines to replace.",
+            "starter_code": "#include <stdio.h>\nstatic const float G = -9.8f;       /* gravity, y up */\nstatic const float W = 100, H = 100, R = 1.0f, REST = 0.8f, DT = 0.01f;\ntypedef struct { float x, y, vx, vy, px, py; } Ball;\n\nstatic void verlet_step(Ball *b) {\n    /* TODO: replace this with velocity Verlet and bounce. */\n    b->x  += b->vx * DT;\n    b->y  += b->vy * DT;\n    b->vy += G * DT;\n    if (b->x < R)      { b->x = R;     b->vx = -b->vx * REST; }\n    if (b->x > W - R)  { b->x = W - R; b->vx = -b->vx * REST; }\n    if (b->y < R)      { b->y = R;     b->vy = -b->vy * REST; }\n    if (b->y > H - R)  { b->y = H - R; b->vy = -b->vy * REST; }\n}\n\nint main(void) {\n    Ball balls[3] = {\n        {10, 90,  15,   0,  10, 90},\n        {50, 70,  -8,  20,  50, 70},\n        {90, 95, -20,  -5,  90, 95},\n    };\n    const int TICKS = 200;\n    for (int t = 0; t < TICKS; t++) {\n        for (int i = 0; i < 3; i++) verlet_step(&balls[i]);\n        for (int i = 0; i < 3; i++) printf(\"T %d %d %.4f %.4f\\n\", t, i, balls[i].x, balls[i].y);\n    }\n    return 0;\n}\n",
+            "kind": "program",
+            "validator": "boss0",
+            "static_hints": [
+              "Velocity Verlet: `x += vx*dt + 0.5*ax*dt*dt;` then `vx += ax*dt;` (ax=0, ay=G).",
+              "Bounce: clamp position to the box edge and flip the corresponding velocity, scaled by REST.",
+              "Run your binary twice; outputs must match byte-for-byte (no rand, no uninitialized data)."
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

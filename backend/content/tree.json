@@ -1,0 +1,60 @@
+{
+  "worlds": [
+    {
+      "id": 0,
+      "title": "Foundations",
+      "subtitle": "C, math, and the data structures every game reuses",
+      "units": [
+        {"id": "w0u0", "title": "C for Data-Oriented Games", "kind": "unit"},
+        {"id": "w0u1", "title": "Linear Algebra From Zero", "kind": "unit"},
+        {"id": "w0u2", "title": "Calculus & Physics Intuition", "kind": "unit"},
+        {"id": "w0u3", "title": "Data Structures & Algorithms for Games", "kind": "unit"},
+        {"id": "w0b0", "title": "Boss 0 — CLI Particle Sim", "kind": "boss"}
+      ]
+    },
+    {"id": 1, "title": "Seeing", "subtitle": "raylib + 3D basics", "units": [
+      {"id": "w1u0", "title": "raylib Fundamentals", "kind": "unit"},
+      {"id": "w1u1", "title": "Into 3D", "kind": "unit"},
+      {"id": "w1u2", "title": "First-Person Controller", "kind": "unit"},
+      {"id": "w1b0", "title": "Boss 1 — Blockout Walkable", "kind": "boss"}
+    ]},
+    {"id": 2, "title": "Scale", "subtitle": "Streaming, LOD, instancing, fog", "units": [
+      {"id": "w2u0", "title": "Shaders & Lighting Depth", "kind": "unit"},
+      {"id": "w2u1", "title": "World at Scale", "kind": "unit"},
+      {"id": "w2b0", "title": "Boss 2 — Foggy Open Scene", "kind": "boss"}
+    ]},
+    {"id": 3, "title": "Black Magic", "subtitle": "Data orientation, bits, SIMD, memory", "units": [
+      {"id": "w3u0", "title": "Data-Oriented Design", "kind": "unit"},
+      {"id": "w3u1", "title": "Bit Tricks & Numeric Tricks", "kind": "unit"},
+      {"id": "w3u2", "title": "SIMD & Branchless", "kind": "unit"},
+      {"id": "w3u3", "title": "Custom Memory", "kind": "unit"},
+      {"id": "w3b0", "title": "Boss 3 — 100k Particles, Stable", "kind": "boss"}
+    ]},
+    {"id": 4, "title": "Entities & Brains", "subtitle": "ECS + behavior systems", "units": [
+      {"id": "w4u0", "title": "ECS Architecture", "kind": "unit"},
+      {"id": "w4u1", "title": "FSM & Behavior Trees", "kind": "unit"},
+      {"id": "w4u2", "title": "Utility AI", "kind": "unit"},
+      {"id": "w4u3", "title": "GOAP + Pathfinding", "kind": "unit"},
+      {"id": "w4b0", "title": "Boss 4 — 20 Living NPCs", "kind": "boss"}
+    ]},
+    {"id": 5, "title": "Living World", "subtitle": "Dwarf-Fortress-style simulation", "units": [
+      {"id": "w5u0", "title": "Simulation Tick vs Render Tick", "kind": "unit"},
+      {"id": "w5u1", "title": "Event-Driven World State", "kind": "unit"},
+      {"id": "w5u2", "title": "Persistence", "kind": "unit"},
+      {"id": "w5b0", "title": "Boss 5 — Return After Days", "kind": "boss"}
+    ]},
+    {"id": 6, "title": "Procedural Worlds", "subtitle": "Noise, caves, WFC, L-systems", "units": [
+      {"id": "w6u0", "title": "Noise-Based Terrain", "kind": "unit"},
+      {"id": "w6u1", "title": "Cellular Automata & BSP", "kind": "unit"},
+      {"id": "w6u2", "title": "Wave Function Collapse", "kind": "unit"},
+      {"id": "w6u3", "title": "L-Systems", "kind": "unit"},
+      {"id": "w6b0", "title": "Boss 6 — Generated Region", "kind": "boss"}
+    ]},
+    {"id": 7, "title": "Interaction, Physics, Polish", "subtitle": "Final boss = real vertical slice", "units": [
+      {"id": "w7u0", "title": "Interaction Systems", "kind": "unit"},
+      {"id": "w7u1", "title": "Physics with JoltC", "kind": "unit"},
+      {"id": "w7u2", "title": "Tooling & Polish", "kind": "unit"},
+      {"id": "w7b0", "title": "Boss 7 — Capstone: the Living World", "kind": "boss"}
+    ]}
+  ]
+}
