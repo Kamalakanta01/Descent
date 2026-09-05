@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -95,8 +95,6 @@ def _curriculum_view(state: dict) -> dict:
                     unit_state = "done"
                 elif u["id"] in unlocked:
                     unit_state = "available"
-            elif u["id"] not in unlocked:
-                unit_state = "locked"
             unit_state = unit_state if u["id"] in unlocked else "locked"
             lesson_list = []
             for les, st in zip(lessons, statuses):
@@ -174,7 +172,7 @@ def get_curriculum():
 def get_lesson(lesson_id: str):
     lesson = content.lesson(lesson_id)
     if not lesson:
-        return {"error": "not found"}, 404
+        raise HTTPException(status_code=404, detail="lesson not found")
     state = db.load()
     cp = lesson["checkpoint"]
     return {
@@ -227,17 +225,19 @@ def get_review_queue():
 def post_answer(req: AnswerReq):
     lesson = content.lesson(req.lesson_id)
     if not lesson:
-        return {"error": "not found"}, 404
+        raise HTTPException(status_code=404, detail="lesson not found")
     try:
         item = lesson["practice"][req.q_index]
     except IndexError:
-        return {"error": "bad q_index"}, 400
+        raise HTTPException(status_code=400, detail="bad q_index")
     correct = req.choice == item["answer"]
     state = db.load()
+    cp = lesson["checkpoint"]
+    is_review = cp["id"] in state["passed"]
     record = store.record_result(state, req.lesson_id, correct)
     xp_delta = 0
     if correct:
-        xp_delta = XP_PRACTICE
+        xp_delta = XP_REVIEW if is_review else XP_PRACTICE
         state["xp"] += xp_delta
     db.save(state)
     return {
@@ -252,7 +252,7 @@ def post_answer(req: AnswerReq):
 def post_run(req: RunReq):
     lesson = content.lesson(req.lesson_id)
     if not lesson:
-        return {"error": "not found"}, 404
+        raise HTTPException(status_code=404, detail="lesson not found")
     cp = lesson["checkpoint"]
     state = db.load()
     state["attempts"][cp["id"]] = state["attempts"].get(cp["id"], 0) + 1
@@ -287,7 +287,7 @@ def post_run(req: RunReq):
 def post_hint(req: HintReq):
     lesson = content.lesson(req.lesson_id)
     if not lesson:
-        return {"error": "not found"}, 404
+        raise HTTPException(status_code=404, detail="lesson not found")
     cp = lesson["checkpoint"]
     state = db.load()
     sk = state["skills"].get(req.lesson_id, {})

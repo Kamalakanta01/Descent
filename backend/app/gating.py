@@ -1,12 +1,13 @@
 """Mastery gating (syllabus Part 1, point 4 and Part 5).
 
-The curriculum is a linear chain of units. Unit N+1 unlocks when BOTH:
-  1. every checkpoint of unit N has passed, and
-  2. unit N's review queue is empty (no lesson skill with p_recall < threshold).
+The curriculum is a linear chain of units. Unit N+1 unlocks when every
+checkpoint of unit N has passed. Reviews are a separate reinforcement track
+(their own queue + HUD pill); a due review never re-locks the path, so a
+learner returning after days away isn't blocked from continuing — only
+reminded to review.
 
 Unlocks are sticky: once earned they are stored in state["unlocked_units"]
-and never removed (reviews may come due later, but earned content re-locks
-never — Duolingo behaves the same after its 2022 path redesign).
+and never removed.
 """
 
 from __future__ import annotations
@@ -43,8 +44,12 @@ def refresh_unlocks(
     lessons_by_unit: dict[str, list[dict]],
     now: float | None = None,
 ) -> list[str]:
-    """Recompute sticky unlocks along the linear chain. Returns newly unlocked."""
-    now = time.time() if now is None else now
+    """Recompute sticky unlocks along the linear chain. Returns newly unlocked.
+
+    `now` is accepted (and ignored) for signature compatibility with callers
+    that compute a timestamp once; unlock decisions depend only on passed
+    checkpoints, never on the review clock.
+    """
     unlocked = set(state["unlocked_units"])
     newly: list[str] = []
     if not ordered_units:
@@ -62,8 +67,6 @@ def refresh_unlocks(
         if not prev_lessons:
             break
         if not unit_passed(state, prev_lessons):
-            break
-        if unit_review_due(state, prev_lessons, now):
             break
         unlocked.add(unit)
         newly.append(unit)

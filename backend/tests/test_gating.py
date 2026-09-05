@@ -45,14 +45,14 @@ def test_next_unit_unlocks_only_after_all_previous_passed():
     assert gating.refresh_unlocks(st, UNITS, LESSONS, NOW) == ["w0u1"]
 
 
-def test_due_reviews_block_unlock():
+def test_due_reviews_do_not_block_unlock():
     st = make_state()
     st["passed"] = ["l1c", "l2c"]
     week_ago = NOW - 7 * 86400
     st["skills"]["l1"] = {"h_days": 1.0, "last_practiced": week_ago, "correct": 1, "incorrect": 0}
     st["skills"]["l2"] = {"h_days": 1.0, "last_practiced": week_ago, "correct": 1, "incorrect": 0}
     newly = gating.refresh_unlocks(st, UNITS, LESSONS, NOW)
-    assert "w0u1" not in newly
+    assert "w0u1" in newly
     assert gating.unit_review_due(st, LESSONS["w0u0"], NOW) == ["l1", "l2"]
 
 

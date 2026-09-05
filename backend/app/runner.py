@@ -23,7 +23,10 @@ from pathlib import Path
 COMPILE_TIMEOUT_S = 30
 RUN_TIMEOUT_S = 6
 RLIMIT_CPU_S = 5
-RLIMIT_AS_BYTES = 512 * 1024 * 1024
+# No RLIMIT_AS: ASan reserves ~15 TB of *virtual* address space for shadow
+# memory, which trips any hard RLIMIT -v. Physical OOM is prevented because
+# ASan tracks allocations itself (aborts on failure), and the CPU timeout is
+# the real backstop for runaway learner programs.
 RLIMIT_FSIZE_BYTES = 2 * 1024 * 1024
 
 GCC = shutil.which("gcc") or "gcc"
@@ -31,7 +34,6 @@ GCC = shutil.which("gcc") or "gcc"
 
 def _apply_limits() -> None:  # runs in the child process (POSIX only)
     resource.setrlimit(resource.RLIMIT_CPU, (RLIMIT_CPU_S, RLIMIT_CPU_S))
-    resource.setrlimit(resource.RLIMIT_AS, (RLIMIT_AS_BYTES, RLIMIT_AS_BYTES))
     resource.setrlimit(resource.RLIMIT_FSIZE, (RLIMIT_FSIZE_BYTES, RLIMIT_FSIZE_BYTES))
 
 
@@ -41,7 +43,11 @@ def _sanitize_compiler_output(stderr: str, workdir: Path) -> str:
 
 def _compile(workdir: Path, sources: list[str]) -> dict | None:
     """Returns None on success, else an error result dict."""
-    cmd = [GCC, "-std=c11", "-Wall", "-Wextra", "-O1", *sources, "-o", "prog", "-lm"]
+    cmd = [
+        GCC, "-std=c11", "-Wall", "-Wextra", "-O1", "-g",
+        "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
+        *sources, "-o", "prog", "-lm",
+    ]
     proc = subprocess.run(
         cmd, cwd=workdir, capture_output=True, text=True, timeout=COMPILE_TIMEOUT_S
     )
