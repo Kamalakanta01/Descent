@@ -19,5 +19,7 @@ export const api = {
     req('/api/answer', { method: 'POST', body: JSON.stringify({ lesson_id, q_index, choice }) }),
   runCheckpoint: (lesson_id, code) =>
     req('/api/checkpoint/run', { method: 'POST', body: JSON.stringify({ lesson_id, code }) }),
+  followupAnswer: (token, choice) =>
+    req('/api/followup/answer', { method: 'POST', body: JSON.stringify({ token, choice }) }),
   hint: (payload) => req('/api/hint', { method: 'POST', body: JSON.stringify(payload) }),
 };

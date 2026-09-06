@@ -5,3 +5,4 @@ backend/.env
 data/state.json
 .pytest_cache/
 .DS_Store
+frontend/node_modules/

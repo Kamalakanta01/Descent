@@ -68,7 +68,7 @@ function unitCard(unit, worldId) {
 
 export async function renderPath(root) {
   root.innerHTML = '';
-  const [data] = await Promise.all([api.curriculum()]);
+  const data = await api.curriculum();
   const page = h('div', { class: 'path-page' });
 
   for (const world of data.worlds) {

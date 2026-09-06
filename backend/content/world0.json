@@ -2,7 +2,6 @@
   "world": 0,
   "units": [
     {
-      "unit_id": "w0u0",
       "lessons": [
         {
           "id": "w0u0l1",
@@ -14,8 +13,26 @@
             "explanation": "Updating velocity before position (semi-implicit Euler) is far more stable than the naive order — we will use this again in the calculus unit. The struct is 16 bytes (4 floats), so 4 particles fit in one cache line, and the inner loop touches them in the order the hardware prefers."
           },
           "practice": [
-            {"q": "Why is one large array of structs usually faster than one struct per heap allocation?", "choices": ["Cache locality from contiguous memory", "The compiler can elide bounds checks", "Garbage collection helps"], "answer": 0, "explanation": "Contiguous arrays stream through cache lines. Heap-per-object scatters the data and the CPU spends most of its time waiting on memory."},
-            {"q": "You add a new field to Particle. What happens to memory layout?", "choices": ["Each element's stride grows; the array stays sequential", "Realloc moves every particle to a new location", "The compiler silently removes the field"], "answer": 0, "explanation": "Strides grow, the array stays packed. (Realloc is only required if the array no longer fits.)"}
+            {
+              "q": "Why is one large array of structs usually faster than one struct per heap allocation?",
+              "choices": [
+                "Cache locality from contiguous memory",
+                "The compiler can elide bounds checks",
+                "Garbage collection helps"
+              ],
+              "answer": 0,
+              "explanation": "Contiguous arrays stream through cache lines. Heap-per-object scatters the data and the CPU spends most of its time waiting on memory."
+            },
+            {
+              "q": "You add a new field to Particle. What happens to memory layout?",
+              "choices": [
+                "The compiler silently removes the field",
+                "Each element's stride grows; the array stays sequential",
+                "Realloc moves every particle to a new location"
+              ],
+              "answer": 1,
+              "explanation": "Strides grow, the array stays packed. (Realloc is only required if the array no longer fits.)"
+            }
           ],
           "checkpoint": {
             "id": "w0u0l1c",
@@ -40,8 +57,26 @@
             "explanation": "Forward-declaring `struct Bot` lets the function-pointer typedef mention the type before the full struct is defined. The `if (bots[i].update)` guard lets bots opt out of an update step this frame without crashing."
           },
           "practice": [
-            {"q": "Why might a switch-by-tag be slower than a function pointer for AI behavior?", "choices": ["The switch runs every entity every frame, defeating the branch predictor", "Function pointers are SIMD-optimised", "The compiler refuses to vectorise switches"], "answer": 0, "explanation": "An indirect call still does one branch per entity — but it can cluster when most entities share a behavior."},
-            {"q": "What does `void (*f)(Entity*, float)` declare?", "choices": ["A variable f that holds a pointer to such a function", "A function f that takes two args", "An array of function pointers"], "answer": 0, "explanation": "The parens around `*f` mean f is a pointer; the rest is the function signature."}
+            {
+              "q": "Why might a switch-by-tag be slower than a function pointer for AI behavior?",
+              "choices": [
+                "Function pointers are SIMD-optimised",
+                "The compiler refuses to vectorise switches",
+                "The switch runs every entity every frame, defeating the branch predictor"
+              ],
+              "answer": 2,
+              "explanation": "An indirect call still does one branch per entity — but it can cluster when most entities share a behavior."
+            },
+            {
+              "q": "What does `void (*f)(Entity*, float)` declare?",
+              "choices": [
+                "A variable f that holds a pointer to such a function",
+                "A function f that takes two args",
+                "An array of function pointers"
+              ],
+              "answer": 0,
+              "explanation": "The parens around `*f` mean f is a pointer; the rest is the function signature."
+            }
           ],
           "checkpoint": {
             "id": "w0u0l2c",
@@ -66,8 +101,26 @@
             "explanation": "The union overlaps `c` and `r` in memory — only one is live at a time. The tag is the contract. This pattern is the foundation of every event system, message bus, and entity component in the later units."
           },
           "practice": [
-            {"q": "Why is the tag stored alongside the union?", "choices": ["The union doesn't remember which arm is active", "The tag lets us use a smaller struct", "C requires it for ABI"], "answer": 0, "explanation": "Reading the wrong arm is undefined behaviour. The tag is the only thing that tells you which arm is live."},
-            {"q": "What is `sizeof(union { Circle c; Rect r; })` (Circle has 1 float, Rect has 2)?", "choices": ["sizeof(Rect) + padding (the largest member)", "sizeof(Circle) * 2", "Undefined"], "answer": 0, "explanation": "Unions overlay their members; the size is the largest plus padding for alignment."}
+            {
+              "q": "Why is the tag stored alongside the union?",
+              "choices": [
+                "C requires it for ABI",
+                "The union doesn't remember which arm is active",
+                "The tag lets us use a smaller struct"
+              ],
+              "answer": 1,
+              "explanation": "Reading the wrong arm is undefined behaviour. The tag is the only thing that tells you which arm is live."
+            },
+            {
+              "q": "What is `sizeof(union { Circle c; Rect r; })` (Circle has 1 float, Rect has 2)?",
+              "choices": [
+                "sizeof(Circle) * 2",
+                "Undefined",
+                "sizeof(Rect) + padding (the largest member)"
+              ],
+              "answer": 2,
+              "explanation": "Unions overlay their members; the size is the largest plus padding for alignment."
+            }
           ],
           "checkpoint": {
             "id": "w0u0l3c",
@@ -92,8 +145,26 @@
             "explanation": "Alignment matters because some architectures trap on misaligned loads (and even on x86 it is a perf cliff). 8 bytes is the minimum for `double`; you might choose 16 for SIMD types."
           },
           "practice": [
-            {"q": "When is it safe to call `arena_reset`?", "choices": ["When no allocation from this arena is still needed (e.g. end of frame)", "After every allocation", "Only once per process"], "answer": 0, "explanation": "The arena forgets everything on reset. If a pointer escaped and is still in use, the next allocation may overwrite it."},
-            {"q": "Why align allocations?", "choices": ["Performance and to satisfy alignment requirements of some types", "It uses less memory", "It prevents integer overflow"], "answer": 0, "explanation": "Some architectures fault on misaligned access; on x86/ARM it is a performance trap for SIMD and doubles."}
+            {
+              "q": "When is it safe to call `arena_reset`?",
+              "choices": [
+                "When no allocation from this arena is still needed (e.g. end of frame)",
+                "After every allocation",
+                "Only once per process"
+              ],
+              "answer": 0,
+              "explanation": "The arena forgets everything on reset. If a pointer escaped and is still in use, the next allocation may overwrite it."
+            },
+            {
+              "q": "Why align allocations?",
+              "choices": [
+                "It prevents integer overflow",
+                "Performance and to satisfy alignment requirements of some types",
+                "It uses less memory"
+              ],
+              "answer": 1,
+              "explanation": "Some architectures fault on misaligned access; on x86/ARM it is a performance trap for SIMD and doubles."
+            }
           ],
           "checkpoint": {
             "id": "w0u0l4c",
@@ -118,8 +189,26 @@
             "explanation": "We stop one byte early to leave room for the terminator. If the source is short, we still write a NUL; if it is long, we truncate and NUL-terminate. No buffer can ever overflow."
           },
           "practice": [
-            {"q": "What can go wrong with `strcpy` into a fixed-size buffer?", "choices": ["Buffer overflow if the source is too long", "Silent truncation", "Compilation error"], "answer": 0, "explanation": "`strcpy` trusts the caller. In a fixed-size struct that lives in a 100k-element array, this is a one-line remote code execution."},
-            {"q": "After `strncpy` of a too-long source, what must you do?", "choices": ["Manually set `buf[N-1] = '\\0'`", "Nothing — strncpy is safe", "Allocate a larger buffer"], "answer": 0, "explanation": "`strncpy` does not NUL-terminate when the source is exactly N or longer. Always set the last byte yourself."}
+            {
+              "q": "What can go wrong with `strcpy` into a fixed-size buffer?",
+              "choices": [
+                "Silent truncation",
+                "Compilation error",
+                "Buffer overflow if the source is too long"
+              ],
+              "answer": 2,
+              "explanation": "`strcpy` trusts the caller. In a fixed-size struct that lives in a 100k-element array, this is a one-line remote code execution."
+            },
+            {
+              "q": "After `strncpy` of a too-long source, what must you do?",
+              "choices": [
+                "Manually set `buf[N-1] = '\\0'`",
+                "Nothing — strncpy is safe",
+                "Allocate a larger buffer"
+              ],
+              "answer": 0,
+              "explanation": "`strncpy` does not NUL-terminate when the source is exactly N or longer. Always set the last byte yourself."
+            }
           ],
           "checkpoint": {
             "id": "w0u0l5c",
@@ -134,10 +223,10 @@
             ]
           }
         }
-      ]
+      ],
+      "id": "w0u0"
     },
     {
-      "unit_id": "w0u1",
       "lessons": [
         {
           "id": "w0u1l1",
@@ -149,8 +238,26 @@
             "explanation": "Notice compound literal `(vec3){...}` — a clean C99 way to return a struct from a function. Every op is a few multiplies; a million of them per frame is nothing."
           },
           "practice": [
-            {"q": "Compute (1,2,3) + (4,-1,2).", "choices": ["(5, 1, 5)", "(5, -3, 9)", "(-3, 3, 1)"], "answer": 0, "explanation": "Componentwise add: 1+4=5, 2+(-1)=1, 3+2=5."},
-            {"q": "Geometrically, what does 2 * v represent?", "choices": ["Same direction, twice the magnitude", "Perpendicular vector", "Inverse direction"], "answer": 0, "explanation": "Scaling stretches a vector. (Scale by 0 produces the zero vector.)"}
+            {
+              "q": "Compute (1,2,3) + (4,-1,2).",
+              "choices": [
+                "(-3, 3, 1)",
+                "(5, 1, 5)",
+                "(5, -3, 9)"
+              ],
+              "answer": 1,
+              "explanation": "Componentwise add: 1+4=5, 2+(-1)=1, 3+2=5."
+            },
+            {
+              "q": "Geometrically, what does 2 * v represent?",
+              "choices": [
+                "Perpendicular vector",
+                "Inverse direction",
+                "Same direction, twice the magnitude"
+              ],
+              "answer": 2,
+              "explanation": "Scaling stretches a vector. (Scale by 0 produces the zero vector.)"
+            }
           ],
           "checkpoint": {
             "id": "w0u1l1c",
@@ -175,8 +282,26 @@
             "explanation": "We use the dot product for the squared length — cheaper than `x*x + y*y + z*y` written three times. The 1e-6 guard is the policy: 'return zero if too small to normalize'."
           },
           "practice": [
-            {"q": "What is the dot product of two perpendicular unit vectors?", "choices": ["0", "1", "-1"], "answer": 0, "explanation": "cos(90°) = 0, so the dot product is 0."},
-            {"q": "Why does normalizing the zero vector require a guard?", "choices": ["Division by zero is undefined", "The result would be a unit vector", "It is slower without the guard"], "answer": 0, "explanation": "Without the guard, `v / 0` is undefined behaviour. Pick a sentinel (here, the zero vector) and document it."}
+            {
+              "q": "What is the dot product of two perpendicular unit vectors?",
+              "choices": [
+                "0",
+                "1",
+                "-1"
+              ],
+              "answer": 0,
+              "explanation": "cos(90°) = 0, so the dot product is 0."
+            },
+            {
+              "q": "Why does normalizing the zero vector require a guard?",
+              "choices": [
+                "It is slower without the guard",
+                "Division by zero is undefined",
+                "The result would be a unit vector"
+              ],
+              "answer": 1,
+              "explanation": "Without the guard, `v / 0` is undefined behaviour. Pick a sentinel (here, the zero vector) and document it."
+            }
           ],
           "checkpoint": {
             "id": "w0u1l2c",
@@ -201,8 +326,26 @@
             "explanation": "The normal direction depends on the winding order: CCW vertices → normal points 'out' by convention. Lighting looks broken if you get this wrong on back faces."
           },
           "practice": [
-            {"q": "What is x̂ × ŷ in a right-handed coordinate system?", "choices": ["ẑ", "-ẑ", "x̂"], "answer": 0, "explanation": "Right-hand rule: fingers curl from x to y, thumb points to z."},
-            {"q": "What happens if you swap the operands of the cross product?", "choices": ["The result flips sign", "Same result", "Result is zero"], "answer": 0, "explanation": "Anti-commutative: a × b = -(b × a). Winding order matters for normals."}
+            {
+              "q": "What is x̂ × ŷ in a right-handed coordinate system?",
+              "choices": [
+                "-ẑ",
+                "x̂",
+                "ẑ"
+              ],
+              "answer": 2,
+              "explanation": "Right-hand rule: fingers curl from x to y, thumb points to z."
+            },
+            {
+              "q": "What happens if you swap the operands of the cross product?",
+              "choices": [
+                "The result flips sign",
+                "Same result",
+                "Result is zero"
+              ],
+              "answer": 0,
+              "explanation": "Anti-commutative: a × b = -(b × a). Winding order matters for normals."
+            }
           ],
           "checkpoint": {
             "id": "w0u1l3c",
@@ -227,9 +370,36 @@
             "explanation": "`r.m[col*4 + row]` is the entry at (row, col) in column-major form. The inner loop is the textbook matrix multiply; it is cache-friendly enough at this size and shows up again when you write a real shader."
           },
           "practice": [
-            {"q": "Why do we need 4 coordinates for affine 3D transforms?", "choices": ["Translation is not a linear map in 3D, so we lift to 4x4", "3x3 can't multiply at all", "Convention only"], "answer": 0, "explanation": "Translation `(x,y,z) → (x+tx, y+ty, z+tz)` cannot be written as a 3x3 matrix-times-vector. Adding a w-coordinate and fixing w=1 lets us represent it as a 4x4."},
-            {"q": "In `M = T * R * S` (column-major), which is applied to a point first?", "choices": ["Scale, then rotation, then translation", "Translation first", "Order is irrelevant"], "answer": 0, "explanation": "Column-major means the rightmost transform is applied first to the point, then the next, and so on. Order matters."},
-            {"q": "In `M_vp = P * V * M`, what runs first on a vertex?", "choices": ["Model matrix M (local to world)", "Projection P", "View V"], "answer": 0, "explanation": "Right-to-left: M brings the vertex into world space, V into camera space, then P applies perspective into clip space."}
+            {
+              "q": "Why do we need 4 coordinates for affine 3D transforms?",
+              "choices": [
+                "Convention only",
+                "Translation is not a linear map in 3D, so we lift to 4x4",
+                "3x3 can't multiply at all"
+              ],
+              "answer": 1,
+              "explanation": "Translation `(x,y,z) → (x+tx, y+ty, z+tz)` cannot be written as a 3x3 matrix-times-vector. Adding a w-coordinate and fixing w=1 lets us represent it as a 4x4."
+            },
+            {
+              "q": "In `M = T * R * S` (column-major), which is applied to a point first?",
+              "choices": [
+                "Translation first",
+                "Order is irrelevant",
+                "Scale, then rotation, then translation"
+              ],
+              "answer": 2,
+              "explanation": "Column-major means the rightmost transform is applied first to the point, then the next, and so on. Order matters."
+            },
+            {
+              "q": "In `M_vp = P * V * M`, what runs first on a vertex?",
+              "choices": [
+                "Model matrix M (local to world)",
+                "Projection P",
+                "View V"
+              ],
+              "answer": 0,
+              "explanation": "Right-to-left: M brings the vertex into world space, V into camera space, then P applies perspective into clip space."
+            }
           ],
           "checkpoint": {
             "id": "w0u1l4c",
@@ -254,8 +424,26 @@
             "explanation": "The clamp keeps `cos(pitch)` from approaching 0, which would make the forward vector flip wildly as the player tries to look straight up."
           },
           "practice": [
-            {"q": "Why is pitch clamped?", "choices": ["To avoid gimbal-like flip when cos(pitch) → 0", "The sine function overflows", "The yaw axis breaks"], "answer": 0, "explanation": "At pitch=±90°, cos=0 and small mouse motion produces huge direction changes. Clamping to ~±89° is the standard fix."},
-            {"q": "At yaw=0, pitch=0, what is the forward vector in this convention?", "choices": ["(0, 0, -1)", "(1, 0, 0)", "(0, 1, 0)"], "answer": 0, "explanation": "Looking down -Z is the OpenGL/Raylib default. Yaw rotates left (toward -X), pitch tilts up (+Y)."}
+            {
+              "q": "Why is pitch clamped?",
+              "choices": [
+                "The yaw axis breaks",
+                "To avoid gimbal-like flip when cos(pitch) → 0",
+                "The sine function overflows"
+              ],
+              "answer": 1,
+              "explanation": "At pitch=±90°, cos=0 and small mouse motion produces huge direction changes. Clamping to ~±89° is the standard fix."
+            },
+            {
+              "q": "At yaw=0, pitch=0, what is the forward vector in this convention?",
+              "choices": [
+                "(1, 0, 0)",
+                "(0, 1, 0)",
+                "(0, 0, -1)"
+              ],
+              "answer": 2,
+              "explanation": "Looking down -Z is the OpenGL/Raylib default. Yaw rotates left (toward -X), pitch tilts up (+Y)."
+            }
           ],
           "checkpoint": {
             "id": "w0u1l5c",
@@ -280,8 +468,26 @@
             "explanation": "The `dot < 0` branch flips B so the arc is always ≤ 180° (quaternions double-cover: q and -q are the same rotation). The `dot > 0.9995` branch avoids dividing by sin(θ) ≈ 0."
           },
           "practice": [
-            {"q": "What does the (w, x, y, z) of a unit quaternion represent?", "choices": ["An axis-plus-angle rotation: (x,y,z) = sin(θ/2)·axis, w = cos(θ/2)", "A scale in w and a direction in xyz", "Four Euler angles"], "answer": 0, "explanation": "The axis is scaled by sin(θ/2); w is cos(θ/2). Unit length w²+x²+y²+z² = 1 is required for a pure rotation."},
-            {"q": "Why slerp instead of interpolating Euler angles?", "choices": ["Euler angles suffer gimbal lock and don't move at constant speed", "Slerp is faster than any numeric solve", "Euler angles are undefined"], "answer": 0, "explanation": "Interpolating yaw/pitch can swing through gimbal lock and take a non-shortest path. Slerp travels the shortest arc at constant angular velocity."}
+            {
+              "q": "What does the (w, x, y, z) of a unit quaternion represent?",
+              "choices": [
+                "An axis-plus-angle rotation: (x,y,z) = sin(θ/2)·axis, w = cos(θ/2)",
+                "A scale in w and a direction in xyz",
+                "Four Euler angles"
+              ],
+              "answer": 0,
+              "explanation": "The axis is scaled by sin(θ/2); w is cos(θ/2). Unit length w²+x²+y²+z² = 1 is required for a pure rotation."
+            },
+            {
+              "q": "Why slerp instead of interpolating Euler angles?",
+              "choices": [
+                "Euler angles are undefined",
+                "Euler angles suffer gimbal lock and don't move at constant speed",
+                "Slerp is faster than any numeric solve"
+              ],
+              "answer": 1,
+              "explanation": "Interpolating yaw/pitch can swing through gimbal lock and take a non-shortest path. Slerp travels the shortest arc at constant angular velocity."
+            }
           ],
           "checkpoint": {
             "id": "w0u1l6c",
@@ -297,10 +503,10 @@
             ]
           }
         }
-      ]
+      ],
+      "id": "w0u1"
     },
     {
-      "unit_id": "w0u2",
       "lessons": [
         {
           "id": "w0u2l1",
@@ -312,8 +518,26 @@
             "explanation": "For perfectly linear data, forward differences are exact. For curved data, the truncation error scales with dt; the rule of thumb is 'small enough that you don't care, large enough that float roundoff doesn't bite.'"
           },
           "practice": [
-            {"q": "What is the unit of `(y[i+1] - y[i]) / dt` if y is in meters and t in seconds?", "choices": ["Meters per second", "Meters", "Seconds"], "answer": 0, "explanation": "Differences of y are meters; differences of t are seconds. The ratio is m/s."},
-            {"q": "Why is too-small dt dangerous with float?", "choices": ["Roundoff: subtracting two close numbers loses precision", "Float can't represent dt", "Stack overflow"], "answer": 0, "explanation": "Catastrophic cancellation: `a - b` where a ≈ b is mostly noise. With dt=1e-7, the velocity estimate can be 100% off."}
+            {
+              "q": "What is the unit of `(y[i+1] - y[i]) / dt` if y is in meters and t in seconds?",
+              "choices": [
+                "Meters",
+                "Seconds",
+                "Meters per second"
+              ],
+              "answer": 2,
+              "explanation": "Differences of y are meters; differences of t are seconds. The ratio is m/s."
+            },
+            {
+              "q": "Why is too-small dt dangerous with float?",
+              "choices": [
+                "Roundoff: subtracting two close numbers loses precision",
+                "Float can't represent dt",
+                "Stack overflow"
+              ],
+              "answer": 0,
+              "explanation": "Catastrophic cancellation: `a - b` where a ≈ b is mostly noise. With dt=1e-7, the velocity estimate can be 100% off."
+            }
           ],
           "checkpoint": {
             "id": "w0u2l1c",
@@ -338,8 +562,26 @@
             "explanation": "Stable across the same time step sizes that would let the naive order gain energy and eventually blow up."
           },
           "practice": [
-            {"q": "What does `a = F / m` tell us?", "choices": ["Force per unit mass is acceleration", "Mass times velocity", "Force minus mass"], "answer": 0, "explanation": "Newton's second law. A heavier body accelerates less for the same force."},
-            {"q": "Why update velocity first (semi-implicit Euler)?", "choices": ["Significantly better energy behavior than the naive order", "Required by the language", "Random"], "answer": 0, "explanation": "The naive order `x += v*dt; v += a*dt` is mathematically equivalent for one step but lets systems gain energy over many steps."}
+            {
+              "q": "What does `a = F / m` tell us?",
+              "choices": [
+                "Force minus mass",
+                "Force per unit mass is acceleration",
+                "Mass times velocity"
+              ],
+              "answer": 1,
+              "explanation": "Newton's second law. A heavier body accelerates less for the same force."
+            },
+            {
+              "q": "Why update velocity first (semi-implicit Euler)?",
+              "choices": [
+                "Required by the language",
+                "Random",
+                "Significantly better energy behavior than the naive order"
+              ],
+              "answer": 2,
+              "explanation": "The naive order `x += v*dt; v += a*dt` is mathematically equivalent for one step but lets systems gain energy over many steps."
+            }
           ],
           "checkpoint": {
             "id": "w0u2l2c",
@@ -356,27 +598,55 @@
         },
         {
           "id": "w0u2l3",
-          "title": "Euler vs Verlet vs RK4",
-          "theory": "Three integrators you'll see in the wild:\n\n- **Euler (semi-implicit)**: cheap, decent, can gain energy on stiff systems.\n- **Verlet**: position-based; `x_{n+1} = 2 x_n - x_{n-1} + a dt²`. Symplectic, stable, great for spring and orbital systems. Velocity is recovered as `(x_n - x_{n-1}) / dt`.\n- **RK4**: four evaluations per step, fourth-order accurate. Best for stiff accuracy; expensive and overkill for gameplay.\n\nBoss 0 asks you to use Verlet precisely because the explicit Euler version leaks energy into a spring system — each orbit's swing radius creeps outward every period until the motion looks nothing like a spring. Watch for it.",
+          "title": "Euler vs velocity Verlet vs RK4",
+          "theory": "Three integrators you'll see in the wild:\n\n- **Euler (semi-implicit)**: cheap, decent, can gain energy on stiff systems.\n- **Verlet (velocity form)**: carries explicit position AND velocity; each step is kick–drift–kick — a half-kick, a drift whose position term carries the other half-kick's worth of acceleration, then a half-kick evaluated with the *average* of the old and new acceleration. Symplectic: energy oscillates but never drifts. The default for springs, orbits, and ragdolls.\n- **RK4**: four evaluations per step, fourth-order accurate. Best for stiff accuracy; expensive and overkill for gameplay.\n\nBoss 0 asks you to use velocity Verlet precisely because the explicit Euler version leaks energy into a spring system — each orbit's swing radius creeps outward every period until the motion looks nothing like a spring. The half-kick averaging is what keeps Verlet's energy error bounded.",
           "worked_example": {
-            "title": "Verlet step for a 1D position",
-            "code": "static void verlet_step(float *x, float *x_prev, float acc, float dt) {\n    float x_new = 2.0f * (*x) - (*x_prev) + acc * dt * dt;\n    *x_prev = *x;\n    *x = x_new;\n}\n\n/* Free fall test: x0 = 100, xp = 100, a = -9.8, dt = 0.1\n * After n steps: x_n = 100 + a*dt^2 * n*(n+1) / 2\n */",
-            "explanation": "Verlet with a constant acceleration has a *closed form* the harness can check exactly: `x_n = x_0 + a·dt²·n(n+1)/2`. Even though the algorithm is the discrete recurrence, we know the answer."
+            "title": "Velocity Verlet for a 1D fall (kick–drift–kick)",
+            "code": "static void verlet_step_v(float *x, float *v, float acc, float dt) {\n    *v  += 0.5f * acc * dt;   /* kick 1: half the momentum change        */\n    *x  += *v * dt;           /* drift: position carries the half-kick   */\n    *v  += 0.5f * acc * dt;   /* kick 2: *recompute acc here* for real F */\n}\n\n/* Free fall test: x0 = 100, v0 = 0, a = -9.8, dt = 0.1\n * v_n = a * n * dt          x_n = x0 + 0.5 * a * (n * dt)^2\n */",
+            "explanation": "With constant acceleration the two half-kicks merge into a single `v += acc*dt`, so the scheme collides with Euler for free fall — the harness checks those closed forms exactly. What you keep from the bracket form is the *ordering*: for a spring, `acc` at the new position differs from the old, and only averaging the two halves cancels the per-step energy error."
           },
           "practice": [
-            {"q": "Which integrator to reach for first in a typical game?", "choices": ["Semi-implicit Euler; switch to Verlet when energy leaks", "RK4 always", "Verlet always"], "answer": 0, "explanation": "Euler is dirt cheap and good enough for most gameplay physics. Verlet for springs/orbits where energy stability matters. RK4 only for stiff accuracy."},
-            {"q": "How is velocity extracted from Verlet's positions?", "choices": ["v ≈ (x - x_prev) / dt", "Stored separately", "Cannot be extracted"], "answer": 0, "explanation": "Verlet doesn't carry velocity explicitly; you approximate it from successive positions."}
+            {
+              "q": "Which integrator to reach for first in a typical game?",
+              "choices": [
+                "Verlet always",
+                "Semi-implicit Euler; switch to Verlet when energy leaks",
+                "RK4 always"
+              ],
+              "answer": 1,
+              "explanation": "Euler is dirt cheap and good enough for most gameplay physics. Verlet for springs/orbits where energy stability matters. RK4 only for stiff accuracy."
+            },
+            {
+              "q": "Why is velocity Verlet symplectic where explicit Euler is not?",
+              "choices": [
+                "It evaluates the force four times per step",
+                "It averages the old and new acceleration across the two half-kicks",
+                "It uses a smaller time step"
+              ],
+              "answer": 1,
+              "explanation": "The average makes the step time-reversible, so the per-step energy error cancels over a full period instead of accumulating. Euler applies the old force at the old position with no such symmetry."
+            },
+            {
+              "q": "In the drift step, where does the half-kick's acceleration come from?",
+              "choices": [
+                "The velocity was already advanced by the first half-kick, bringing ½·a·dt² into the position",
+                "A separate position integrator",
+                "It doesn't — the drift is acceleration-free"
+              ],
+              "answer": 0,
+              "explanation": "Drift uses the half-kicked velocity, so the position update implicitly carries ½·a·dt². The second half-kick then completes the velocity using the force at the new position."
+            }
           ],
           "checkpoint": {
             "id": "w0u2l3c",
-            "title": "Implement verlet_step",
-            "instructions": "Implement `void verlet_step(float *x, float *x_prev, float acc, float dt)`. Compute `x_new = 2x - x_prev + a*dt²`, then set `x_prev = x` and `x = x_new`.",
-            "starter_code": "void verlet_step(float *x, float *x_prev, float acc, float dt) {\n    /* TODO */\n}\n",
+            "title": "Implement verlet_step_v",
+            "instructions": "Implement `void verlet_step_v(float *x, float *v, float acc, float dt)` as kick–drift–kick for a constant force: half-kick the velocity, drift the position with the half-kicked velocity, then half-kick again. Because the force is constant the two half-kicks merge into `v += acc*dt`.",
+            "starter_code": "void verlet_step_v(float *x, float *v, float acc, float dt) {\n    /* TODO: kick-drift-kick */\n}\n",
             "kind": "function",
-            "harness": "#include <math.h>\n#include <stdio.h>\n#include \"learner.c\"\nint main(void) {\n    int f = 0;\n    float x = 100.0f, xp = 100.0f;\n    const float a = -9.8f, dt = 0.1f;\n    for (int n = 1; n <= 5; n++) {\n        verlet_step(&x, &xp, a, dt);\n        double expected = 100.0 + a * dt * dt * n * (n + 1) / 2.0;\n        if (fabsf(x - expected) > 1e-3f) { printf(\"FAIL step n=%d x=%f exp=%f\\n\", n, x, expected); f++; }\n        if (fabsf(xp - (100.0 + a * dt * dt * (n-1) * n / 2.0)) > 1e-3f) { printf(\"FAIL x_prev n=%d xp=%f\\n\", n, xp); f++; }\n    }\n    if (!f) printf(\"ALL PASS\\n\");\n    return f ? 1 : 0;\n}\n",
+            "harness": "#include <math.h>\n#include <stdio.h>\n#include \"learner.c\"\nint main(void) {\n    int f = 0;\n    float x = 100.0f, v = 0.0f;\n    const float a = -9.8f, dt = 0.1f;\n    for (int n = 1; n <= 5; n++) {\n        verlet_step_v(&x, &v, a, dt);\n        double xt = 100.0 + 0.5 * a * (n * dt) * (n * dt);\n        double vt = a * n * dt;\n        if (fabsf(x - xt) > 1e-3f) { printf(\"FAIL step n=%d x=%f exp=%f\\n\", n, x, xt); f++; }\n        if (fabsf(v - vt) > 1e-3f) { printf(\"FAIL step n=%d v=%f exp=%f\\n\", n, v, vt); f++; }\n    }\n    if (!f) printf(\"ALL PASS\\n\");\n    return f ? 1 : 0;\n}\n",
             "static_hints": [
-              "`x_new = 2*x - x_prev + a*dt*dt` — that's the whole algorithm.",
-              "After computing x_new, assign x_prev = x (the *old* x), then x = x_new."
+              "Velocity Verlet = deliberate ordering: ½-kick, drift, ½-kick.",
+              "For a constant force the two half-kicks merge to `v += acc*dt` — that's all you need to write."
             ]
           }
         },
@@ -390,8 +660,26 @@
             "explanation": "Clamp negatives to 0 — a surface whose normal points away from the light should not go negative (it just goes black)."
           },
           "practice": [
-            {"q": "If the light is directly overhead on a flat ground (n=(0,1,0), l=(0,1,0)), the result is:", "choices": ["intensity * 1.0", "intensity * 0.5", "0"], "answer": 0, "explanation": "Parallel vectors: dot is 1."},
-            {"q": "If the light is behind the surface (n=(0,1,0), l=(0,-1,0)), the result is:", "choices": ["0 (clamped)", "-intensity", "intensity"], "answer": 0, "explanation": "Negative dot is clamped to 0 in the diffuse model."}
+            {
+              "q": "If the light is directly overhead on a flat ground (n=(0,1,0), l=(0,1,0)), the result is:",
+              "choices": [
+                "intensity * 0.5",
+                "0",
+                "intensity * 1.0"
+              ],
+              "answer": 2,
+              "explanation": "Parallel vectors: dot is 1."
+            },
+            {
+              "q": "If the light is behind the surface (n=(0,1,0), l=(0,-1,0)), the result is:",
+              "choices": [
+                "0 (clamped)",
+                "-intensity",
+                "intensity"
+              ],
+              "answer": 0,
+              "explanation": "Negative dot is clamped to 0 in the diffuse model."
+            }
           ],
           "checkpoint": {
             "id": "w0u2l4c",
@@ -406,10 +694,10 @@
             ]
           }
         }
-      ]
+      ],
+      "id": "w0u2"
     },
     {
-      "unit_id": "w0u3",
       "lessons": [
         {
           "id": "w0u3l1",
@@ -421,8 +709,26 @@
             "explanation": "Initial cap of 4 covers small use cases; doubling covers up to 2^N without further realloc until the cap grows large."
           },
           "practice": [
-            {"q": "Why is doubling capacity `O(1)` amortized?", "choices": ["Each push is constant except for the rare doubling, which averages out", "The compiler removes the cost", "Doubling is constant-time"], "answer": 0, "explanation": "Total copies over N pushes is 1+2+4+...+N/2 < 2N, so amortized O(1)."},
-            {"q": "After realloc, what happens to old `&a->data[i]` pointers?", "choices": ["They are invalidated (data may have moved)", "They still point to the same memory", "They become read-only"], "answer": 0, "explanation": "Realloc may move the array. Re-fetch pointers after any push that grew the array."}
+            {
+              "q": "Why is doubling capacity `O(1)` amortized?",
+              "choices": [
+                "Doubling is constant-time",
+                "Each push is constant except for the rare doubling, which averages out",
+                "The compiler removes the cost"
+              ],
+              "answer": 1,
+              "explanation": "Total copies over N pushes is 1+2+4+...+N/2 < 2N, so amortized O(1)."
+            },
+            {
+              "q": "After realloc, what happens to old `&a->data[i]` pointers?",
+              "choices": [
+                "They still point to the same memory",
+                "They become read-only",
+                "They are invalidated (data may have moved)"
+              ],
+              "answer": 2,
+              "explanation": "Realloc may move the array. Re-fetch pointers after any push that grew the array."
+            }
           ],
           "checkpoint": {
             "id": "w0u3l1c",
@@ -447,8 +753,26 @@
             "explanation": "The harness provides the FNV-1a hash, the Entry layout, and `map_put` to set up test entries. You implement `map_get` only."
           },
           "practice": [
-            {"q": "Why keep load factor under ~0.7?", "choices": ["Probes get exponentially longer as the table fills", "The compiler warns above 0.7", "Hash collisions disappear below 0.7"], "answer": 0, "explanation": "Probing chains grow with load. Past 0.7 the table slows down dramatically; at 1.0 it stops working."},
-            {"q": "Why is deletion tricky in open addressing?", "choices": ["You must mark tombstones to preserve the probe chain", "You cannot delete", "The hash re-computes"], "answer": 0, "explanation": "Removing a slot entirely breaks the chain for keys further down. Tombstones mark the slot as 'previously used' so probing continues correctly."}
+            {
+              "q": "Why keep load factor under ~0.7?",
+              "choices": [
+                "Probes get exponentially longer as the table fills",
+                "The compiler warns above 0.7",
+                "Hash collisions disappear below 0.7"
+              ],
+              "answer": 0,
+              "explanation": "Probing chains grow with load. Past 0.7 the table slows down dramatically; at 1.0 it stops working."
+            },
+            {
+              "q": "Why is deletion tricky in open addressing?",
+              "choices": [
+                "The hash re-computes",
+                "You must mark tombstones to preserve the probe chain",
+                "You cannot delete"
+              ],
+              "answer": 1,
+              "explanation": "Removing a slot entirely breaks the chain for keys further down. Tombstones mark the slot as 'previously used' so probing continues correctly."
+            }
           ],
           "checkpoint": {
             "id": "w0u3l2c",
@@ -473,8 +797,26 @@
             "explanation": "The harness will pop everything after your pushes. If you implemented sift up correctly, the popped priorities come out in ascending order."
           },
           "practice": [
-            {"q": "What is the parent index of element i in a binary heap array?", "choices": ["(i - 1) / 2", "i / 2", "2 * i + 1"], "answer": 0, "explanation": "Children are 2i+1 and 2i+2; the parent is the inverse."},
-            {"q": "Why use a heap instead of a sorted array for an A* frontier?", "choices": ["Insertion is O(log n) instead of O(n)", "Heaps are smaller", "Sorted arrays are slower to read"], "answer": 0, "explanation": "A* inserts and pops constantly; sorted-array insert is O(n)."}
+            {
+              "q": "What is the parent index of element i in a binary heap array?",
+              "choices": [
+                "i / 2",
+                "2 * i + 1",
+                "(i - 1) / 2"
+              ],
+              "answer": 2,
+              "explanation": "Children are 2i+1 and 2i+2; the parent is the inverse."
+            },
+            {
+              "q": "Why use a heap instead of a sorted array for an A* frontier?",
+              "choices": [
+                "Insertion is O(log n) instead of O(n)",
+                "Heaps are smaller",
+                "Sorted arrays are slower to read"
+              ],
+              "answer": 0,
+              "explanation": "A* inserts and pops constantly; sorted-array insert is O(n)."
+            }
           ],
           "checkpoint": {
             "id": "w0u3l3c",
@@ -499,8 +841,26 @@
             "explanation": "A queue array is enough — no linked list needed. We mark `seen` early to avoid pushing a node twice."
           },
           "practice": [
-            {"q": "10,000 entities with pairwise collision checks per frame is roughly 50,000,000 checks. Why bad?", "choices": ["Quadratic in entity count — most games pair this with spatial partitioning", "The number is too large to print", "The compiler can't optimize"], "answer": 0, "explanation": "O(n²) is the cost you pay for naive pairwise tests. Spatial partitioning (uniform grid, then octree) brings it down to O(n)."},
-            {"q": "BFS finds shortest paths in which kind of graph?", "choices": ["Unweighted", "Weighted", "Both"], "answer": 0, "explanation": "BFS counts edges, not edge weights. For weighted graphs you need Dijkstra or A*."}
+            {
+              "q": "10,000 entities with pairwise collision checks per frame is roughly 50,000,000 checks. Why bad?",
+              "choices": [
+                "The compiler can't optimize",
+                "Quadratic in entity count — most games pair this with spatial partitioning",
+                "The number is too large to print"
+              ],
+              "answer": 1,
+              "explanation": "O(n²) is the cost you pay for naive pairwise tests. Spatial partitioning (uniform grid, then octree) brings it down to O(n)."
+            },
+            {
+              "q": "BFS finds shortest paths in which kind of graph?",
+              "choices": [
+                "Weighted",
+                "Both",
+                "Unweighted"
+              ],
+              "answer": 2,
+              "explanation": "BFS counts edges, not edge weights. For weighted graphs you need Dijkstra or A*."
+            }
           ],
           "checkpoint": {
             "id": "w0u3l4c",
@@ -515,10 +875,10 @@
             ]
           }
         }
-      ]
+      ],
+      "id": "w0u3"
     },
     {
-      "unit_id": "w0b0",
       "lessons": [
         {
           "id": "w0b0l1",
@@ -530,8 +890,26 @@
             "explanation": "This is velocity Verlet split into kick–drift–kick: a half-kick, a full drift carrying half a kick's worth of acceleration, then a half-kick using the *averaged* old and new acceleration. The average is what makes the scheme time-reversible and symplectic — energy oscillates but never drifts. Explicit Euler applies the old acceleration at the old position; it has no such symmetry."
           },
           "practice": [
-            {"q": "Why does explicit Euler fail the energy check on this spring sim?", "choices": ["It pumps energy into the oscillator, so the swing radius grows every period", "It is slower than Verlet", "The spring constants are too large"], "answer": 0, "explanation": "Explicit Euler is not symplectic: it applies the old acceleration at the old position, the per-step energy error never cancels, and amplitude grows like e^(ω²·dt²·t). Verlet's symmetric averaging of old and new acceleration keeps the error bounded."},
-            {"q": "Why must the output be byte-identical between two runs?", "choices": ["Multiplayer replays, deterministic save states, debuggability", "Faster", "Required by the harness"], "answer": 0, "explanation": "Determinism is what lets a save file, replay, or netcode match across machines. Random numbers or uninitialized memory break it instantly."}
+            {
+              "q": "Why does explicit Euler fail the energy check on this spring sim?",
+              "choices": [
+                "It pumps energy into the oscillator, so the swing radius grows every period",
+                "It is slower than Verlet",
+                "The spring constants are too large"
+              ],
+              "answer": 0,
+              "explanation": "Explicit Euler is not symplectic: it applies the old acceleration at the old position, the per-step energy error never cancels, and amplitude grows like e^(ω²·dt²·t). Verlet's symmetric averaging of old and new acceleration keeps the error bounded."
+            },
+            {
+              "q": "Why must the output be byte-identical between two runs?",
+              "choices": [
+                "Required by the harness",
+                "Multiplayer replays, deterministic save states, debuggability",
+                "Faster"
+              ],
+              "answer": 1,
+              "explanation": "Determinism is what lets a save file, replay, or netcode match across machines. Random numbers or uninitialized memory break it instantly."
+            }
           ],
           "checkpoint": {
             "id": "w0b0l1c",
@@ -547,7 +925,8 @@
             ]
           }
         }
-      ]
+      ],
+      "id": "w0b0"
     }
   ]
 }

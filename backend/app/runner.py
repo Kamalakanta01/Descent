@@ -27,6 +27,10 @@ RLIMIT_CPU_S = 5
 # memory, which trips any hard RLIMIT -v. Physical OOM is prevented because
 # ASan tracks allocations itself (aborts on failure), and the CPU timeout is
 # the real backstop for runaway learner programs.
+# Also no RLIMIT_NPROC: it counts the UID's *total* processes (which on this
+# machine is already in the hundreds), and LeakSanitizer forks a helper at
+# exit — any limit tight enough to matter makes every sanctioned binary abort
+# at cleanup. Fork-bomb containment is the process-group kill in _run().
 RLIMIT_FSIZE_BYTES = 2 * 1024 * 1024
 
 GCC = shutil.which("gcc") or "gcc"
@@ -41,8 +45,10 @@ def _sanitize_compiler_output(stderr: str, workdir: Path) -> str:
     return stderr.replace(str(workdir) + os.sep, "").strip()
 
 
-def _compile(workdir: Path, sources: list[str]) -> dict | None:
-    """Returns None on success, else an error result dict."""
+def _compile(workdir: Path, sources: list[str]) -> tuple[str | None, str]:
+    """Returns (errors, warnings); errors None on success. stderr is never
+    discarded: with -Wall -Wextra on, warnings from a *successful* compile are
+    pedagogically valuable (uninitialized vars, sign mismatches...)."""
     cmd = [
         GCC, "-std=c11", "-Wall", "-Wextra", "-O1", "-g",
         "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
@@ -51,43 +57,49 @@ def _compile(workdir: Path, sources: list[str]) -> dict | None:
     proc = subprocess.run(
         cmd, cwd=workdir, capture_output=True, text=True, timeout=COMPILE_TIMEOUT_S
     )
+    out = _sanitize_compiler_output(proc.stderr, workdir)
     if proc.returncode != 0:
-        return {
-            "compiled": False,
-            "passed": False,
-            "errors": _sanitize_compiler_output(proc.stderr, workdir) or "compilation failed",
-            "stdout": "",
-            "timed_out": False,
-            "checks": [],
-        }
-    return None
+        return (out or "compilation failed"), ""
+    return None, out
 
 
 def _run(workdir: Path) -> dict:
-    """Returns {ok, stdout, timed_out, exit_code}."""
+    """Returns {ok, stdout, stderr, exit_code, timed_out}. Kills the whole
+    process group on timeout — a stray fork(fork()) in learner code must not
+    outlive the harness around it."""
+    import signal
+
     start = time.monotonic()
+    proc = subprocess.Popen(
+        ["./prog"],
+        cwd=workdir,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        preexec_fn=_apply_limits if os.name == "posix" else None,
+        start_new_session=os.name == "posix",
+    )
     try:
-        proc = subprocess.run(
-            ["./prog"],
-            cwd=workdir,
-            capture_output=True,
-            text=True,
-            timeout=RUN_TIMEOUT_S,
-            preexec_fn=_apply_limits if os.name == "posix" else None,
-        )
-        elapsed = time.monotonic() - start
-        # Killed by signal (negative returncode) means a limit kicked in.
-        signal_kill = proc.returncode is not None and proc.returncode < 0
-        result = {
-            "ok": True,
-            "stdout": proc.stdout,
-            "stderr": proc.stderr,
-            "exit_code": proc.returncode,
-            "timed_out": signal_kill or elapsed >= RUN_TIMEOUT_S - 0.1,
-        }
-        return result
+        out, err = proc.communicate(timeout=RUN_TIMEOUT_S)
     except subprocess.TimeoutExpired:
+        if os.name == "posix":
+            os.killpg(proc.pid, signal.SIGKILL)
+        else:
+            proc.kill()
+        proc.communicate()
         return {"ok": False, "stdout": "", "stderr": "", "exit_code": None, "timed_out": True}
+    elapsed = time.monotonic() - start
+    signal_kill = proc.returncode is not None and proc.returncode < 0
+    # A run approaching the wall clock counts as timed out even on clean exit
+    # (the 0.1s margin covers communicate()'s own return latency); solutions
+    # this slow are pathological whatever the exit code says.
+    return {
+        "ok": True,
+        "stdout": out,
+        "stderr": err,
+        "exit_code": proc.returncode,
+        "timed_out": signal_kill or elapsed >= RUN_TIMEOUT_S - 0.1,
+    }
 
 
 def validate_boss0(stdout: str) -> list[dict]:
@@ -204,11 +216,19 @@ def compile_and_run(checkpoint: dict, learner_code: str) -> dict:
         (workdir / "learner.c").write_text(learner_code, encoding="utf-8")
         if kind == "function":
             (workdir / "harness.c").write_text(checkpoint["harness"], encoding="utf-8")
-            err = _compile(workdir, ["harness.c"])
+            errors, warnings = _compile(workdir, ["harness.c"])
         else:
-            err = _compile(workdir, ["learner.c"])
-        if err:
-            return err
+            errors, warnings = _compile(workdir, ["learner.c"])
+        if errors is not None:
+            return {
+                "compiled": False,
+                "passed": False,
+                "errors": errors,
+                "warnings": "",
+                "stdout": "",
+                "timed_out": False,
+                "checks": [],
+            }
 
         run = _run(workdir)
         if run["timed_out"]:
@@ -216,6 +236,7 @@ def compile_and_run(checkpoint: dict, learner_code: str) -> dict:
                 "compiled": True,
                 "passed": False,
                 "errors": "time limit exceeded (infinite loop or very slow code?)",
+                "warnings": warnings,
                 "stdout": run["stdout"],
                 "timed_out": True,
                 "checks": [],
@@ -227,6 +248,7 @@ def compile_and_run(checkpoint: dict, learner_code: str) -> dict:
                 "compiled": True,
                 "passed": passed,
                 "errors": "" if passed else "one or more tests failed",
+                "warnings": warnings,
                 "stdout": run["stdout"],
                 "timed_out": False,
                 "checks": [],
@@ -250,6 +272,7 @@ def compile_and_run(checkpoint: dict, learner_code: str) -> dict:
             "compiled": True,
             "passed": passed,
             "errors": "",
+            "warnings": warnings,
             "stdout": run["stdout"],
             "timed_out": False,
             "checks": checks,

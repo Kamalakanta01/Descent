@@ -34,11 +34,17 @@ PYTHONPATH=. ../.venv/bin/pytest tests/test_runner.py::test_boss0_reference_pass
 cd backend && ../.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
+Frontend smoke tests (node + jsdom, no browser):
+
+```bash
+cd frontend && npm test     # wraps: node --test "tests/*.test.js"
+```
+
 Then open http://127.0.0.1:8000.
 
 ## Architecture / layout
 
 - `backend/app/` — FastAPI app (`main.py` wires everything). `hlr.py` (spaced repetition), `gating.py` (unlock chain), `store.py` (JSON persistence), `runner.py` (C compile/run), `llm.py` (OpenRouter), `content.py` (curriculum loader).
-- `backend/content/` — `tree.json` = metadata for **all 8 worlds**; `worldN.json` = authored lessons. Only `world0.json` has real content; worlds 1–7 are placeholders.
+- `backend/content/` — `tree.json` = metadata for **all 8 worlds**; `worldN.json` = authored lessons. Only `world0.json` has real content (19 lessons + Boss 0); worlds 1–7 are placeholders.
 - `frontend/` — ES-module SPA, no build. `index.html` → `app.js` → `views/{path,lesson,review}.js` + `api.js` + `views/dom.js`.
 - `data/state.json` — learner state, generated at first run; gitignored, safe to delete to reset.

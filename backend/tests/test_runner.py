@@ -66,6 +66,14 @@ def test_compile_error_reported_cleanly():
     assert res["errors"]
 
 
+def test_successful_compile_still_reports_warnings():
+    sloppy = SOLUTION.replace("void integrate", "void unused_helper(void) { int z = 3; (void)z; }\nstatic int dead_var;\nvoid integrate")
+    res = runner.compile_and_run({"kind": "function", "harness": HARNESS}, sloppy)
+    assert res["compiled"] is True
+    assert res["passed"] is True
+    assert "dead_var" in res["warnings"]
+
+
 INFINITE_HARNESS = r"""
 #include <stdio.h>
 #include "learner.c"

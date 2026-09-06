@@ -1,0 +1,11 @@
+{
+  "name": "descent-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"tests/*.test.js\""
+  },
+  "dependencies": {
+    "jsdom": "^30.0.1"
+  }
+}

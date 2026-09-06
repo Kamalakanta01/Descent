@@ -91,4 +91,61 @@ export function toast(msg, kind = 'info') {
   setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 400); }, 3600);
 }
 
+/* Shuffle a copy of arr, but pin the permutation per key for the session:
+   the displayed order stays identical across re-renders, so the correct
+   answer never moves between attempts/spoils position. Returns [{value, index}]
+   pairs so callers can map back to the original choice index. */
+const stableOrder = new Map();
+export function shuffleStable(key, arr) {
+  if (!stableOrder.has(key)) {
+    const idx = arr.map((_, i) => i);
+    for (let i = idx.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [idx[i], idx[j]] = [idx[j], idx[i]];
+    }
+    stableOrder.set(key, idx);
+  }
+  return stableOrder.get(key).map(i => ({ value: arr[i], index: i }));
+}
+
+/* Reusable multiple-choice card: shuffled choices (stable per key), locks after
+   answering, highlights the correct choice (via res.answer_index) and the wrong
+   pick, shows the explanation, then calls onAnswered for page-specific extras. */
+export function quizCard(question, key, grade, onAnswered) {
+  const card = h('div', { class: 'q-card' });
+  card.append(h('p', { class: 'q-text' }, [esc(question.q)]));
+  const choices = h('div', { class: 'choices' });
+  for (const { value, index } of shuffleStable(key, question.choices)) {
+    const btn = h('button', { class: 'choice', 'data-orig': index }, [esc(value)]);
+    btn.addEventListener('click', async () => {
+      if (card.dataset.locked === '1') return;
+      card.dataset.locked = '1';
+      try {
+        const res = await grade(index);
+        card.classList.add(res.correct ? 'q-correct' : 'q-wrong');
+        for (const b of choices.querySelectorAll('.choice')) {
+          b.disabled = true;
+          const orig = +b.dataset.orig;
+          if (orig === res.answer_index) b.classList.add('choice-correct');
+          else if (orig === index && !res.correct) b.classList.add('choice-wrong');
+        }
+        card.append(h('div', { class: 'q-expl' }, [esc(res.explanation || '')]));
+        if (onAnswered) onAnswered(card, res);
+      } catch (e) {
+        card.dataset.locked = '';
+        toast(e.message, 'error');
+      }
+    });
+    choices.append(btn);
+  }
+  card.append(choices);
+  return { card, choices };
+}
+
+export function xpFly(xp) {
+  const el = h('div', { class: 'xp-fly' }, [`+${xp} XP`]);
+  document.body.append(el);
+  setTimeout(() => el.remove(), 1400);
+}
+
 export function fmtXp(n) { return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n); }

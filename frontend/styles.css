@@ -229,7 +229,36 @@ a.hud-pill:hover { text-decoration: none; border-color: var(--green); }
 }
 .choice:hover:not(:disabled) { border-color: var(--green); background: var(--bg-panel); transform: translateX(2px); }
 .choice:disabled { opacity: 0.55; cursor: default; }
+.choice.choice-correct:disabled {
+  opacity: 1; border-color: var(--green); background: color-mix(in srgb, var(--green) 14%, var(--bg-panel));
+  color: var(--green); font-weight: 700;
+}
+.choice.choice-wrong:disabled {
+  opacity: 1; border-color: var(--red); background: color-mix(in srgb, var(--red) 12%, var(--bg-panel));
+  color: var(--red); font-weight: 700;
+}
 .q-expl { margin-top: 10px; color: var(--dim); font-size: 13.5px; padding: 8px 10px; border-radius: 8px; background: rgba(255,255,255,0.03); }
+
+/* ---------- follow-up / warm-up ---------- */
+.followup-box {
+  margin-top: 12px; padding: 12px 14px; border-radius: 12px;
+  border: 1px dashed color-mix(in srgb, var(--violet) 45%, var(--line));
+  background: color-mix(in srgb, var(--violet) 6%, transparent);
+}
+.followup-head {
+  display: flex; align-items: center; gap: 7px; margin-bottom: 8px;
+  color: var(--violet); font-weight: 700; font-size: 12.5px; letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.followup-box .q-card { border-color: color-mix(in srgb, var(--violet) 30%, var(--line)); }
+
+.warmup-panel { border-color: color-mix(in srgb, var(--violet) 40%, var(--line)); background: var(--bg-panel); }
+.warmup-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.warmup-title { display: flex; align-items: center; gap: 7px; font-weight: 700; font-size: 14px; }
+.warmup-title .icon { color: var(--gold); }
+.warmup-panel .q-card { margin-bottom: 0; }
+
+.console-warn { color: #ffe08a; }
 
 .hint-box { margin-top: 10px; padding: 10px 12px; border-radius: 8px; border: 1px dashed var(--violet); color: var(--text); }
 .hint-src { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--violet); margin-bottom: 4px; }
@@ -309,6 +338,12 @@ a.hud-pill:hover { text-decoration: none; border-color: var(--green); }
 /* ---------- review page ---------- */
 .review-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
 .review-head h3 { margin: 0; }
+.rerun-res {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 10px;
+}
+.rerun-res.ok { color: var(--green); background: color-mix(in srgb, var(--green) 10%, transparent); }
+.rerun-res.bad { color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); }
 .p-badge { display: inline-flex; align-items: center; gap: 5px; color: var(--gold); font-weight: 700; white-space: nowrap; }
 .empty-panel { text-align: center; padding: 60px 30px; }
 .empty-icon .icon svg { width: 48px; height: 48px; color: var(--green); }

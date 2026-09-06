@@ -59,7 +59,7 @@ class Content:
         self._lessons_by_unit: dict[str, list[dict]] = {}
         for w in self.worlds.values():
             for unit in w["units"]:
-                self._lessons_by_unit[unit["unit_id"]] = unit["lessons"]
+                self._lessons_by_unit[unit["id"]] = unit["lessons"]
                 for lesson in unit["lessons"]:
                     self._lessons[lesson["id"]] = lesson
         self._unit_ids_ordered = self._flatten_units()
@@ -76,6 +76,10 @@ class Content:
 
     def unit_lessons(self, unit_id: str) -> list[dict]:
         return list(self._lessons_by_unit.get(unit_id, []))
+
+    def lessons_by_unit(self) -> dict[str, list[dict]]:
+        """All lessons keyed by unit id (the public surface for gating)."""
+        return self._lessons_by_unit
 
     def lesson(self, lesson_id: str) -> dict | None:
         return self._lessons.get(lesson_id)

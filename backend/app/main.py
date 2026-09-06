@@ -57,9 +57,22 @@ FOLLOWUP_SYSTEM = (
     "question; >= 4 days means a harder one. No markdown fences, no extra text."
 )
 
-# Ephemeral answers for LLM-generated follow-up questions: token -> {"answer", "explanation"}.
-# In-memory only — a restart drops unanswered follow-ups, which is fine (regenerated on demand).
+# Ephemeral answers for LLM-generated follow-up/review questions:
+# token -> {"answer", "explanation"}. In-memory only — a restart drops
+# unanswered questions, which is fine (regenerated on demand).
 FOLLOWUPS: dict[str, dict] = {}
+
+REVIEW_SYSTEM = (
+    "You are a C/gamedev tutor writing ONE multiple-choice review question for "
+    "spaced repetition. Test recall of the lesson's core concept from a slightly "
+    "different angle than the original practice question. Output ONLY a JSON "
+    'object with keys: "q", "choices" (3 short strings), "answer" (0-based index '
+    'of the correct choice), "explanation" (1-2 sentences). No markdown fences.'
+)
+
+# (lesson_id, utc-day) -> generated question dict or None. Regenerated daily;
+# None is cached too so a keyless/down LLM isn't retried on every page load.
+_REVIEW_GEN_CACHE: dict[tuple[str, str], dict | None] = {}
 
 
 class AnswerReq(BaseModel):
@@ -204,11 +217,12 @@ def get_state():
 
 @app.get("/api/curriculum")
 def get_curriculum():
-    state = db.load()
-    # Recompute unlocks in case state was seeded or manually edited.
-    gating.refresh_unlocks(state, content.ordered_units(), content._lessons_by_unit)
-    db.save(state)
-    return _curriculum_view(state)
+    # Recompute unlocks in case state was seeded or manually edited — atomically.
+    def refresh(state):
+        gating.refresh_unlocks(state, content.ordered_units(), content.lessons_by_unit())
+        return _curriculum_view(state)
+
+    return db.update(refresh)
 
 
 @app.get("/api/lesson/{lesson_id}")
@@ -244,12 +258,19 @@ def get_review_queue():
     state = db.load()
     now = time.time()
     due = []
+    gen_left = 2  # fresh-question budget per queue load (free-tier rate limits)
     for lid, sk in state["skills"].items():
         if sk["last_practiced"] is None:
             continue
         p = hlr.current_p_recall(sk["h_days"], sk["last_practiced"], now)
         if p < hlr.DUE_THRESHOLD:
             lesson = content.lesson(lid)
+            generated = None
+            if lesson and gen_left > 0:
+                generated = _generated_review_question(lesson)
+            if generated is not None:
+                gen_left -= 1
+            cp = lesson["checkpoint"] if lesson else None
             due.append(
                 {
                     "lesson_id": lid,
@@ -259,6 +280,11 @@ def get_review_queue():
                         {k: q[k] for k in ("q", "choices")}
                         for q in (lesson["practice"] if lesson else [])
                     ],
+                    "generated": generated,
+                    "checkpoint": (
+                        {"title": cp["title"], "kind": cp.get("kind"), "starter_code": cp["starter_code"]}
+                        if cp else None
+                    ),
                 }
             )
     return {"due": due}
@@ -274,23 +300,25 @@ def post_answer(req: AnswerReq):
     except IndexError:
         raise HTTPException(status_code=400, detail="bad q_index")
     correct = req.choice == item["answer"]
-    state = db.load()
     cp = lesson["checkpoint"]
-    is_review = cp["id"] in state["passed"]
-    record = store.record_result(state, req.lesson_id, correct)
-    xp_delta = 0
-    if correct:
-        xp_delta = XP_REVIEW if is_review else XP_PRACTICE
-        state["xp"] += xp_delta
-    db.save(state)
+
+    def score(state: dict) -> tuple[float, int]:
+        is_review = cp["id"] in state["passed"]
+        record = store.record_result(state, req.lesson_id, correct)
+        xp = (XP_REVIEW if is_review else XP_PRACTICE) if correct else 0
+        state["xp"] += xp
+        return record["h_days"], xp
+
+    h_days, xp_delta = db.update(score)
     resp: dict = {
         "correct": correct,
         "explanation": item.get("explanation", ""),
         "xp": xp_delta,
-        "h_days": round(record["h_days"], 3),
+        "h_days": round(h_days, 3),
+        "answer_index": item["answer"],  # safe post-answer: revealed for highlighting
     }
     if not correct:
-        followup = _try_followup(lesson, item, req.choice, record["h_days"])
+        followup = _try_followup(lesson, item, req.choice, h_days)
         if followup:
             resp["followup"] = followup
     return resp
@@ -312,12 +340,33 @@ def _try_followup(lesson: dict, item: dict, wrong_choice: int, h_days: float) ->
     return {"token": token, "q": parsed["q"], "choices": parsed["choices"]}
 
 
+def _generated_review_question(lesson: dict) -> dict | None:
+    """One fresh LLM review question per lesson per day; answer stays server-side.
+    Static authored practice remains the fallback when the LLM is unavailable."""
+    key = (lesson["id"], time.strftime("%Y-%m-%d", time.gmtime()))
+    if key in _REVIEW_GEN_CACHE:
+        return _REVIEW_GEN_CACHE[key]
+    out = None
+    parsed = _parse_followup(
+        llm_client.chat(REVIEW_SYSTEM, f"Lesson: {lesson['title']}\n"
+                                       f"The core concept:\n{lesson['theory'][:1200]}",
+                        max_models=3)[0]
+    )
+    if parsed:
+        token = secrets.token_urlsafe(12)
+        FOLLOWUPS[token] = {"answer": parsed["answer"], "explanation": parsed["explanation"]}
+        out = {"token": token, "q": parsed["q"], "choices": parsed["choices"]}
+    _REVIEW_GEN_CACHE[key] = out
+    return out
+
+
 @app.post("/api/followup/answer")
 def post_followup_answer(req: FollowupReq):
     rec = FOLLOWUPS.pop(req.token, None)  # one-shot
     if not rec:
         raise HTTPException(status_code=404, detail="unknown follow-up")
-    return {"correct": req.choice == rec["answer"], "explanation": rec["explanation"]}
+    return {"correct": req.choice == rec["answer"], "explanation": rec["explanation"],
+            "answer_index": rec["answer"]}
 
 
 @app.post("/api/checkpoint/run")
@@ -326,32 +375,32 @@ def post_run(req: RunReq):
     if not lesson:
         raise HTTPException(status_code=404, detail="lesson not found")
     cp = lesson["checkpoint"]
-    state = db.load()
-    state["attempts"][cp["id"]] = state["attempts"].get(cp["id"], 0) + 1
-    attempt_n = state["attempts"][cp["id"]]
+    res = runner.compile_and_run(cp, req.code)  # slow: stays outside the lock
 
-    res = runner.compile_and_run(cp, req.code)
-
-    xp_delta = 0
-    newly: list[str] = []
-    hint = None
-    if res["passed"]:
-        first_time = cp["id"] not in state["passed"]
-        if first_time:
-            base = XP_BOSS if cp.get("kind") == "program" else XP_CHECKPOINT
-            bonus = XP_FIRST_TRY_BONUS if attempt_n == 1 else 0
-            xp_delta = base + bonus
-            state["xp"] += xp_delta
-            state["passed"].append(cp["id"])
-            state["completed_lessons"].append(lesson["id"])
+    def score(state: dict) -> tuple[int, int, list[str]]:
+        state["attempts"][cp["id"]] = state["attempts"].get(cp["id"], 0) + 1
+        attempt_n = state["attempts"][cp["id"]]
+        xp, newly = 0, []
+        if res["passed"]:
+            if cp["id"] in state["passed"]:
+                # Re-pass as review: pays XP only when the skill is actually due.
+                sk = state["skills"].get(lesson["id"])
+                if sk and sk["last_practiced"] and hlr.is_due(sk["h_days"], sk["last_practiced"]):
+                    xp = XP_REVIEW
+            else:
+                xp = (XP_BOSS if cp.get("kind") == "program" else XP_CHECKPOINT) + (
+                    XP_FIRST_TRY_BONUS if attempt_n == 1 else 0
+                )
+                state["passed"].append(cp["id"])
+                state["completed_lessons"].append(lesson["id"])
+                newly = gating.refresh_unlocks(state, content.ordered_units(), content.lessons_by_unit())
             store.record_result(state, lesson["id"], True)
-            newly = gating.refresh_unlocks(
-                state, content.ordered_units(), content._lessons_by_unit
-            )
-    else:
-        store.record_result(state, lesson["id"], False)
+        else:
+            store.record_result(state, lesson["id"], False)
+        state["xp"] += xp
+        return attempt_n, xp, newly
 
-    db.save(state)
+    attempt_n, xp_delta, newly = db.update(score)
     return {**res, "xp": xp_delta, "attempt": attempt_n, "newly_unlocked": newly}
 
 

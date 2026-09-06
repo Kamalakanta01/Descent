@@ -23,6 +23,13 @@ def test_roundtrip_and_atomic_write(tmp_path):
     assert store.Store(p).load()["xp"] == 42
 
 
+def test_update_runs_mutation_under_one_lock(tmp_path):
+    s = store.Store(tmp_path / "state.json")
+    n = s.update(lambda st: st.__setitem__("xp", st["xp"] + 7) or st["xp"])
+    assert n == 7  # update returns fn's result…
+    assert s.load()["xp"] == 7  # …and persists the mutation
+
+
 def test_streak_starts_continues_and_breaks():
     st = store.default_state()
     day0 = time.mktime((2026, 9, 1, 10, 0, 0, 0, 0, -1))

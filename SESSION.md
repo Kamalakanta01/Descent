@@ -9,8 +9,11 @@ Authoritative docs: `AGENTS.md`, `docs/superpowers/specs/2026-09-05-descent-lear
 
 ```bash
 cd backend
-PYTHONPATH=. ../.venv/bin/pytest tests -q          # 42/42 passing as of handoff
+PYTHONPATH=. ../.venv/bin/pytest tests -q          # 53/53 passing as of handoff
 ../.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+
+# frontend smoke tests (node + jsdom, no build step):
+npm test                                        # from frontend/
 ```
 
 Fresh machine setup: `python3 -m venv .venv && .venv/bin/pip install -r backend/requirements.txt`.
@@ -51,6 +54,49 @@ Fresh machine setup: `python3 -m venv .venv && .venv/bin/pip install -r backend/
 - Next audit follow-up: Boss 3 (syllabus line 143) references Boss 0's sim — now
   spring-based; update the cross-ref when authoring world 3.
 
+### 2026-09-06 batch (systematic audit fixes — all tested)
+
+- **`store.update(fn)`** (thread-safe read→mutate→write under one lock) backs all
+  score-and-persist paths in `main.py`; `runner.compile_and_run` runs outside the
+  lock (it is the slow part).
+- **`runner.py`: warnings are now surfaced** — `_compile` returns `(errors, warnings)`,
+  stderr is never discarded. Learners see `-Wall -Wextra` notes (sign mismatches,
+  uninitialized vars) rendered as `.console-warn`.
+- **Timeout containment = process-group kill** (`start_new_session` + `os.killpg`).
+  The audit's naive RLIMIT_NPROC "fix" was tried and REJECTED with a comment: it
+  caps the UID's *total* processes and makes LeakSanitizer's exit fork fail every
+  sanctioned binary. RLIMIT_CPU 5 s + RLIMIT_FSIZE 2 MB + 6 s wall are the limits.
+- **Practice answers redistributed**: every lesson's first practice question had
+  the correct answer at index 0 (and `-1` used one elsewhere). All 41 answers
+  re-spread to a 14/14/13 counter; client shuffles choices with session-stable
+  shuffle keys (`shuffleStable`) so order is fixed per question per session.
+  Invariant test `test_practice_answers_are_distributed_across_positions` guards it.
+- **Shuffle-key collision bug (caught by the jsdom suite)**: the inline warm-up
+  reused the lesson's own practice shuffle key (`w0u0l1:p0`), so a 2-choice
+  warm-up pinned a permutation that truncated the lesson's 3-choice question.
+  Warm-up keys are namespaced `warmup:`/`w:`; lesson practice stays `{id}:p{n}`
+  so review page and lesson page pin the same order.
+- **`w0u2l3` rewritten around velocity Verlet** (kick-drift-kick) — the scheme
+  Boss 0's turning-point energy check requires. Gravity closed-form harness
+  (x = 100 + ½a·t², v = a·t), verified `passed: True`. The old "Euler vs RK4"
+  framing implied RK4 was the answer; RK4 is damping-free but this lesson now
+  teaches the interpolator that actually matters here.
+- **LLM review questions**: `REVIEW_SYSTEM` + lesson theory → a fresh MCQ per
+  lesson per UTC day (cached, even negative), 2-generated-per-queue-load budget,
+  answers held server-side in a one-shot token registry (`FOLLOWUPS`, popped on
+  answer). Endpoint `POST /api/followup/answer`. Keyless LLM → falls back to
+  authored practice silently.
+- **Re-pass checkpoint XP is gated**: `post_run` pays XP_REVIEW on a re-pass only
+  when the skill is actually due (`hlr.is_due`) — otherwise 0. No more farming a
+  passed checkpoint for XP.
+- **Frontend jsdom suite added** — `frontend/tests/{dom,app}.test.js` under
+  `node --test` (10 tests). Big gotchas captured for later sessions:
+  (1) `app.js` only *registers* a DOMContentLoaded listener, jsdom never fires it
+  — tests must `document.dispatchEvent(new window.Event('DOMContentLoaded'))`;
+  (2) views are imported directly for page tests (unique query strings like
+  `?lv_a` give fresh module instances since apps cache module-scope refs);
+  (3) jsdom needs `window.scrollTo` + `Element.prototype.scrollIntoView` stubbed.
+
 ## Deferred backlog (top first)
 
 ### 1. Author world 1 ("Seeing") so the unlock chain advances past the stall
@@ -62,8 +108,9 @@ content milestone. Placeholder cards already communicate the stall gracefully.
 ### 2. Optional polish
 - Boss 0 works, but only world 0 is playable — consider a "content roadmap" modal
   on the path page so the coming-soon units set expectations.
-- `frontend/` has no automated tests; a smoke test that renders `renderPath`
-  against a stubbed `api.js` would de-risk future `path.js`/`dom.js` changes.
+- "Unit -1": a syntax-on-ramp world (or unit) teaching C syntax for absolute C
+  beginners before world 0. **Pending owner decision** — don't author unilaterally.
+- Boss 3 cross-ref (see Decisions above) when world 3 is authored.
 
 ## Gotchas (verify against AGENTS.md — it may be stale after the review-gate change)
 

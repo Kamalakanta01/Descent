@@ -1,6 +1,7 @@
 """HTTP-level tests via FastAPI TestClient (catches tuple-vs-HTTPException bugs)."""
 
 import json
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -143,3 +144,54 @@ def test_followup_tolerates_markdown_fences(client, monkeypatch):
 def test_followup_absent_on_garbage_llm_json(client, monkeypatch):
     monkeypatch.setattr(main, "llm_client", _StubLLM("not json at all"))
     assert "followup" not in _wrong(client).json()
+
+
+W0L1_INTEGRATE = """typedef struct { float x, y, vx, vy; } Particle;
+
+void integrate(Particle *ps, int n, float dt) {
+    for (int i = 0; i < n; i++) {
+        ps[i].vy -= 9.8f * dt;
+        ps[i].x  += ps[i].vx * dt;
+        ps[i].y  += ps[i].vy * dt;
+    }
+}
+"""
+
+
+def test_answer_returns_correct_index_for_highlight(client):
+    r = client.post("/api/answer", json={"lesson_id": "w0u0l1", "q_index": 0, "choice": 0})
+    assert r.json()["answer_index"] == 0
+
+
+def test_checkpoint_repass_pays_review_xp_only_when_due(client):
+    # First pass: full XP
+    r = client.post("/api/checkpoint/run", json={"lesson_id": "w0u0l1", "code": W0L1_INTEGRATE})
+    assert r.json()["passed"] is True and r.json()["xp"] == 20 + 10
+
+    # Immediate re-pass: not due -> 0 XP
+    r = client.post("/api/checkpoint/run", json={"lesson_id": "w0u0l1", "code": W0L1_INTEGRATE})
+    assert r.json()["passed"] is True and r.json()["xp"] == 0
+
+    # Force the skill due (tiny half-life, practiced long ago)
+    s = main.db.load()
+    sk = s["skills"]["w0u0l1"]
+    sk["h_days"] = 0.001
+    sk["last_practiced"] = time.time() - 3 * 86400
+    main.db.save(s)
+
+    r = client.post("/api/checkpoint/run", json={"lesson_id": "w0u0l1", "code": W0L1_INTEGRATE})
+    assert r.json()["passed"] is True and r.json()["xp"] == 3  # XP_REVIEW
+
+
+def test_review_queue_includes_generated_question_with_llm(client, monkeypatch):
+    monkeypatch.setattr(main, "llm_client", _StubLLM(FOLLOWUP_JSON))
+    s = main.db.load()
+    s["skills"]["w0u0l1"] = {"h_days": 0.001, "last_practiced": time.time() - 3 * 86400,
+                             "correct": 1, "incorrect": 0}
+    main.db.save(s)
+    r = client.get("/api/review-queue")
+    entry = next(d for d in r.json()["due"] if d["lesson_id"] == "w0u0l1")
+    assert entry["generated"]["q"] == "Simpler: what does a += b do to a?"
+    r = client.post("/api/followup/answer",
+                    json={"token": entry["generated"]["token"], "choice": 0})
+    assert r.json()["correct"] is True

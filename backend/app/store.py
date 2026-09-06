@@ -54,18 +54,33 @@ class Store:
             json.dump(state, f, indent=2)
         os.replace(tmp, self.path)  # atomic on POSIX
 
+    def _read(self) -> dict:
+        with open(self.path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        # forward-compat: fill any missing keys
+        for k, v in default_state().items():
+            state.setdefault(k, v)
+        return state
+
     def load(self) -> dict:
         with _LOCK:
-            with open(self.path, "r", encoding="utf-8") as f:
-                state = json.load(f)
-            # forward-compat: fill any missing keys
-            for k, v in default_state().items():
-                state.setdefault(k, v)
-            return state
+            return self._read()
 
     def save(self, state: dict) -> None:
         with _LOCK:
             self._write(state)
+
+    def update(self, fn):
+        """Read -> fn(state) -> write, all under one lock. Returns fn's result.
+
+        Endpoints should use this for every mutate-the-state operation: separate
+        load()/save() calls are individually safe but two overlapping requests
+        can otherwise clobber each other's XP/progress between them."""
+        with _LOCK:
+            state = self._read()
+            result = fn(state)
+            self._write(state)
+            return result
 
     def reset(self) -> None:
         self.save(default_state())

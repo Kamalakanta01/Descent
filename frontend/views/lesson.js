@@ -1,12 +1,6 @@
-import { h, icon, esc, md, highlightC, toast } from './dom.js';
+import { h, icon, esc, md, highlightC, toast, quizCard, xpFly } from './dom.js';
 import { api } from '../api.js';
 import { refreshHud } from '../app.js';
-
-const XP_FLY = (xp) => {
-  const el = h('div', { class: 'xp-fly' }, [`+${xp} XP`]);
-  document.body.append(el);
-  setTimeout(() => el.remove(), 1400);
-};
 
 export async function renderLesson(root, lessonId) {
   root.innerHTML = '';
@@ -25,6 +19,34 @@ export async function renderLesson(root, lessonId) {
       ]),
     ])
   );
+
+  /* ---------- warm-up (inline due review) ---------- */
+  const review = await api.reviewQueue().catch(() => null);
+  if (review && review.due.length) {
+    const first = review.due[0];
+    const warm = h('section', { class: 'panel warmup-panel' }, [
+      h('div', { class: 'warmup-head' }, [
+        h('div', { class: 'warmup-title' }, [
+          icon('crown'),
+          h('b', {}, [' Warm-up']),
+          h('span', { class: 'dim small' }, [` ${first.title} · ${Math.round(first.p_recall * 100)}% recall`]),
+        ]),
+        h('a', { class: 'ghost-btn small', href: '#/review' }, [`${review.due.length} due →`]),
+      ]),
+    ]);
+    const generated = first.generated;
+    const q = generated ? { q: generated.q, choices: generated.choices } : first.practice[0];
+    const { card } = quizCard(q, generated ? `w:${generated.token}` : `warmup:${first.lesson_id}:p0`, async (origIdx) => {
+      const res = generated
+        ? await api.followupAnswer(generated.token, origIdx)
+        : await api.answer(first.lesson_id, 0, origIdx);
+      if (res.correct && res.xp) xpFly(res.xp);
+      refreshHud();
+      return res;
+    });
+    warm.append(card);
+    page.append(warm);
+  }
 
   /* ---------- theory ---------- */
   const theory = h('section', { class: 'panel theory-panel' }, [
@@ -47,60 +69,49 @@ export async function renderLesson(root, lessonId) {
   const practicePanel = h('section', { class: 'panel practice-panel' }, [
     h('h2', {}, [icon('spark'), ' Guided practice']),
   ]);
-  let firstWrong = null;
   lesson.practice.forEach((q, qi) => {
-    const cardEl = h('div', { class: 'q-card' });
-    cardEl.append(h('p', { class: 'q-text' }, [esc(q.q)]));
-    const choices = h('div', { class: 'choices' });
-    q.choices.forEach((c, ci) => {
-      const btn = h('button', { class: 'choice' }, [esc(c)]);
-      btn.addEventListener('click', async () => {
-        if (cardEl.dataset.locked === '1') return;
-        cardEl.dataset.locked = '1';
-        try {
-          const res = await api.answer(lesson.id, qi, ci);
-          feedback(cardEl, choices, res, qi);
-        } catch (e) { toast(e.message, 'error'); cardEl.dataset.locked = ''; }
-      });
-      choices.append(btn);
+    const { card } = quizCard(q, `${lesson.id}:p${qi}`, async (origIdx) => {
+      const res = await api.answer(lesson.id, qi, origIdx);
+      if (!res.correct) {
+        const hintBtn = h('button', { class: 'ghost-btn small' }, [icon('spark'), ' Ask for a hint']);
+        hintBtn.addEventListener('click', async () => {
+          hintBtn.disabled = true; hintBtn.textContent = 'Thinking…';
+          try {
+            const qh = await api.hint({
+              lesson_id: lesson.id, q_index: qi,
+              wrong_answer: q.choices[origIdx],  // what they actually clicked
+            });
+            card.append(h('div', { class: 'hint-box' }, [
+              h('div', { class: 'hint-src' }, [qh.source === 'static' ? 'authored hint' : `tutor · ${qh.source.replace('llm:', '')}`]),
+              h('div', {}, [esc(qh.hint)]),
+            ]));
+          } catch (e) { toast(e.message, 'error'); }
+          hintBtn.remove();
+        });
+        card.append(hintBtn);
+        if (res.followup) renderFollowup(card, res.followup);
+      } else if (res.xp) {
+        xpFly(res.xp);
+      }
+      refreshHud();
+      return res;
     });
-    cardEl.append(choices);
-    practicePanel.append(cardEl);
+    practicePanel.append(card);
   });
-  page.append(practicePanel);
 
-  function feedback(cardEl, choicesEl, res, qi) {
-    const btns = choicesEl.querySelectorAll('.choice');
-    btns.forEach((b, i) => {
-      const correctIdx = res.correct ? undefined : undefined;
-      b.disabled = true;
+  function renderFollowup(card, fu) {
+    const box = h('div', { class: 'followup-box' }, [
+      h('div', { class: 'followup-head' }, [icon('spark'), ' One more, at the right level']),
+    ]);
+    const { card: fc } = quizCard({ q: fu.q, choices: fu.choices }, `f:${fu.token}`, async (origIdx) => {
+      const res = await api.followupAnswer(fu.token, origIdx);
+      refreshHud();
+      return res;
     });
-    if (res.correct) {
-      cardEl.classList.add('q-correct');
-      if (res.xp) XP_FLY(res.xp);
-    } else {
-      cardEl.classList.add('q-wrong');
-      firstWrong = qi;
-    }
-    const ex = h('div', { class: 'q-expl' }, [esc(res.explanation || '')]);
-    cardEl.append(ex);
-    if (!res.correct) {
-      const hintBtn = h('button', { class: 'ghost-btn small' }, [icon('spark'), ' Ask for a hint']);
-      hintBtn.addEventListener('click', async () => {
-        hintBtn.disabled = true; hintBtn.textContent = 'Thinking…';
-        try {
-          const qh = await api.hint({ lesson_id: lesson.id, q_index: qi, wrong_answer: lesson.practice[qi].choices[0] });
-          cardEl.append(h('div', { class: 'hint-box' }, [
-            h('div', { class: 'hint-src' }, [qh.source === 'static' ? 'authored hint' : `tutor · ${qh.source.replace('llm:', '')}`]),
-            h('div', {}, [esc(qh.hint)]),
-          ]));
-        } catch (e) { toast(e.message, 'error'); }
-        hintBtn.remove();
-      });
-      cardEl.append(hintBtn);
-    }
-    refreshHud();
+    box.append(fc);
+    card.append(box);
   }
+  page.append(practicePanel);
 
   /* ---------- checkpoint ---------- */
   const cp = lesson.checkpoint;
@@ -180,6 +191,7 @@ export async function renderLesson(root, lessonId) {
     ]);
     resultBox.append(head);
     if (res.errors) resultBox.append(h('pre', { class: 'console console-err' }, [esc(res.errors)]));
+    if (res.warnings) resultBox.append(h('pre', { class: 'console console-warn' }, [esc('warnings:\n' + res.warnings)]));
     if (res.stdout && !res.passed) resultBox.append(h('pre', { class: 'console' }, [esc(res.stdout.slice(0, 4000))]));
     if (res.checks && res.checks.length) {
       const list = h('div', { class: 'checks' });
@@ -193,7 +205,7 @@ export async function renderLesson(root, lessonId) {
       resultBox.append(list);
     }
     if (res.passed) {
-      if (res.xp) XP_FLY(res.xp);
+      if (res.xp) xpFly(res.xp);
       if (res.newly_unlocked && res.newly_unlocked.length) {
         toast(`Unlocked: ${res.newly_unlocked.join(', ')}`, 'success');
       }

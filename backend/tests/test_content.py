@@ -30,11 +30,26 @@ def test_ordered_units_chains_across_worlds():
     assert any(u.startswith("w1") for u in ordered)
 
 
+def test_practice_answers_are_distributed_across_positions():
+    c = Content("content")
+    qs = [
+        q for u in c.worlds_view()[0]["units"]
+        for l in c.unit_lessons(u["id"])
+        for q in l["practice"]
+    ]
+    assert len(qs) >= 30
+    positions = [q["answer"] for q in qs]
+    assert len(set(positions)) >= 2, "correct answers must not all sit at index 0"
+    assert positions.count(0) / len(positions) < 0.6
+    for q in qs:
+        assert 0 <= q["answer"] < len(q["choices"])
+
+
 def test_validation_catches_missing_practice_answer(tmp_path):
     bad = {
         "world": 0,
         "units": [{
-            "unit_id": "tu",
+            "id": "tu",
             "lessons": [{
                 "id": "t1", "title": "t",
                 "theory": "...", "xp": 10,
