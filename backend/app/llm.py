@@ -152,7 +152,7 @@ class LLMClient:
                 continue
             if status == 200:
                 try:
-                    content = body["choices"][0]["message"]["content"].strip()
+                    content = (body["choices"][0]["message"]["content"] or "").strip()
                 except (KeyError, IndexError, TypeError):
                     self._sleep(BACKOFF_S)
                     continue

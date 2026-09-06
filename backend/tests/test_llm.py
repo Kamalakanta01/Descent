@@ -86,6 +86,22 @@ def test_chat_backs_off_short_on_generic_failure():
     assert sleeps == [llm.BACKOFF_S] * 2
 
 
+def test_chat_skips_null_content_and_uses_next_model():
+    posts = []
+    def post(url, headers, payload, timeout):
+        posts.append(payload["model"])
+        return (200, {"choices": [{"message": {"content": None}}]}) if len(posts) == 1 \
+            else (200, {"choices": [{"message": {"content": "Got it"}}]})
+    client = llm.LLMClient(
+        api_key="x",
+        get_fn=lambda *a, **kw: fake_models(["deepseek/a:free", "qwen/b:free"]),
+        post_fn=post, sleep_fn=lambda s, *a, **k: None,
+    )
+    content, model = client.chat("system", "user", max_models=2)
+    assert content == "Got it"
+    assert len(posts) == 2
+
+
 def test_chat_without_key_returns_none():
     client = llm.LLMClient(api_key=None)
     assert client.chat("s", "u") == (None, None)
