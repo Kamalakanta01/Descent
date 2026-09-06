@@ -7,6 +7,9 @@ Local single-user learning app that teaches C gamedev (syllabus in `c-gamedev-co
 Run from `backend/` (the app is `app` package there). The venv is at repo **root** (`../.venv`), not under `backend/`.
 
 ```bash
+# run the app (API + frontend, auto-reload); bootstraps venv+deps on first run:
+./run.sh                        # from repo root; ./run.sh 9000 for another port
+
 # tests — MUST run from backend/ with PYTHONPATH=. :
 cd backend
 PYTHONPATH=. ../.venv/bin/pytest tests -q
@@ -15,7 +18,7 @@ PYTHONPATH=. ../.venv/bin/pytest tests -q
 PYTHONPATH=. ../.venv/bin/pytest tests/test_runner.py
 PYTHONPATH=. ../.venv/bin/pytest tests/test_runner.py::test_boss0_reference_passes_validator -q
 
-# run the server (serves API + static frontend, no separate dev server):
+# run the server directly (serves API + static frontend; ./run.sh is a thin wrapper):
 cd backend && ../.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 

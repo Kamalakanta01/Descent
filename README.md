@@ -12,26 +12,33 @@ Handoff state: `SESSION.md`
 ## Setup
 
 ```bash
+./run.sh          # one command: creates venv + installs deps on first run, then serves on :8000
+# optional: ./run.sh 9000   to serve on a different port
+```
+
+Manual setup if you prefer:
+
+```bash
 python3 -m venv .venv                       # at the repo ROOT
 .venv/bin/pip install -r backend/requirements.txt
 cp backend/.env.example backend/.env        # optional OpenRouter key for hints
 ```
 
-## Commands (run from `backend/`; the app is the `app` package there)
+## Commands
 
-The venv is at the repo **root** (`../.venv`), not under `backend/`.
+The venv lives at the repo **root** (`../.venv` if you're in `backend/`).
 
 ```bash
-# tests — MUST run from backend/ with PYTHONPATH=. :
+# run the app (API + frontend, auto-reload). Default port 8000:
+./run.sh                  # e.g. ./run.sh 9000 for another port
+
+# backend tests — MUST run from backend/ with PYTHONPATH=. :
 cd backend
 PYTHONPATH=. ../.venv/bin/pytest tests -q
 
-# single test file / test:
+# single test file or test:
 PYTHONPATH=. ../.venv/bin/pytest tests/test_runner.py
 PYTHONPATH=. ../.venv/bin/pytest tests/test_runner.py::test_boss0_reference_passes_validator -q
-
-# run the server (serves API + static frontend, no separate dev server):
-cd backend && ../.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 Frontend smoke tests (node + jsdom, no browser):
