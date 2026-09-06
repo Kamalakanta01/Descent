@@ -5,7 +5,7 @@ import { refreshHud } from '../app.js';
 export async function renderReview(root) {
   root.innerHTML = '';
   const { due } = await api.reviewQueue();
-  const page = h('div', { class: 'review-page' });
+  const page = h('div');
   page.append(h('div', { class: 'lesson-head' }, [
     h('a', { class: 'back-link', href: '#/' }, ['‹ path']),
     h('h1', {}, ['Spaced review']),
@@ -21,7 +21,7 @@ export async function renderReview(root) {
     root.append(page); return;
   }
   for (const item of due) {
-    const card = h('div', { class: 'panel review-card' }, [
+    const card = h('div', { class: 'panel' }, [
       h('div', { class: 'review-head' }, [
         h('div', {}, [
           h('h3', {}, [esc(item.title)]),

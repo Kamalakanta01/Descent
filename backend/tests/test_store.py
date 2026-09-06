@@ -54,5 +54,4 @@ def test_record_result_updates_hlr_and_counts():
     sk = store.record_result(st, "l1", correct=False, now=now)
     assert sk["incorrect"] == 1 and sk["h_days"] < h1
     # initial half-life is the syllabus default
-    assert store.default_state() or True
     assert store.get_skill(store.default_state(), "x")["h_days"] == 1.0

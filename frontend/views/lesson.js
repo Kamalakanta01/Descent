@@ -193,6 +193,7 @@ export async function renderLesson(root, lessonId) {
     if (res.errors) resultBox.append(h('pre', { class: 'console console-err' }, [esc(res.errors)]));
     if (res.warnings) resultBox.append(h('pre', { class: 'console console-warn' }, [esc('warnings:\n' + res.warnings)]));
     if (res.stdout && !res.passed) resultBox.append(h('pre', { class: 'console' }, [esc(res.stdout.slice(0, 4000))]));
+    if (res.runtime_stderr) resultBox.append(h('pre', { class: 'console console-warn' }, [esc('runtime:\n' + res.runtime_stderr.slice(0, 4000))]));
     if (res.checks && res.checks.length) {
       const list = h('div', { class: 'checks' });
       for (const c of res.checks) {

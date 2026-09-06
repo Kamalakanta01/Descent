@@ -299,6 +299,8 @@ def post_answer(req: AnswerReq):
         item = lesson["practice"][req.q_index]
     except IndexError:
         raise HTTPException(status_code=400, detail="bad q_index")
+    if not (0 <= req.choice < len(item["choices"])):
+        raise HTTPException(status_code=400, detail="choice out of range")
     correct = req.choice == item["answer"]
     cp = lesson["checkpoint"]
 
@@ -395,7 +397,7 @@ def post_run(req: RunReq):
                 state["completed_lessons"].append(lesson["id"])
                 newly = gating.refresh_unlocks(state, content.ordered_units(), content.lessons_by_unit())
             store.record_result(state, lesson["id"], True)
-        else:
+        elif res["compiled"]:
             store.record_result(state, lesson["id"], False)
         state["xp"] += xp
         return attempt_n, xp, newly

@@ -131,6 +131,30 @@ test('lesson page: warm-up, shuffled practice, correct-highlight, follow-up, hin
   assert.ok(fuCard.querySelector('.choice-correct'));
 });
 
+test('lesson page: runtime_stderr (sanitizer crash) is rendered on failed run', async () => {
+  makeDom();
+  const log = routes({
+    'POST /api/checkpoint/run': {
+      passed: false, xp: 0, attempts: 1, newly_unlocked: [],
+      errors: '', warnings: '',
+      runtime_stderr: 'AddressSanitizer: heap-buffer-overflow',
+    },
+  });
+  const lessonView = await import('../views/lesson.js?lv_c');
+  await lessonView.renderLesson(document.getElementById('app'), 'w0u0l1');
+
+  const runBtn = document.querySelector('.run-btn');
+  runBtn.click();
+  await tick();
+
+  const run = log.find(l => l.url === 'POST /api/checkpoint/run');
+  assert.ok(run, 'checkpoint run issued');
+  const resultBox = document.querySelector('.result-box:not(.hidden)');
+  assert.ok(resultBox, 'result box shown');
+  assert.match(resultBox.textContent, /runtime:/);
+  assert.match(resultBox.textContent, /heap-buffer-overflow/);
+});
+
 test('lesson page without due reviews shows no warm-up panel', async () => {
   makeDom();
   routes();
@@ -152,7 +176,7 @@ test('review page: generated question via followup token + checkpoint re-run', a
   const reviewView = await import('../views/review.js?rv_a');
   await reviewView.renderReview(document.getElementById('app'));
 
-  const cards = document.querySelectorAll('.review-card');
+  const cards = document.querySelectorAll('.panel');
   assert.equal(cards.length, 1);
   assert.match(cards[0].textContent, /Generated Q/);
 

@@ -96,6 +96,19 @@ Fresh machine setup: `python3 -m venv .venv && .venv/bin/pip install -r backend/
   (2) views are imported directly for page tests (unique query strings like
   `?lv_a` give fresh module instances since apps cache module-scope refs);
   (3) jsdom needs `window.scrollTo` + `Element.prototype.scrollIntoView` stubbed.
+- **Compile errors no longer decay the skill** (follow-up batch, all tested):
+  `record_result(False)` runs only when `res["compiled"]` is True — a syntax typo
+  no longer shrinks the half-life; runtime/test failures and timeouts still decay.
+  Guarded by `test_compile_error_does_not_decay_skill`. Practiced the skill
+  memory; code attempts are a separate track.
+- **Sanitizer output is now visible**: `lesson.js` renders `runtime_stderr`
+  (ASan/UBSan crash dumps) under a `runtime:` console line; the frontend suite
+  asserts it (`runtime_stderr` mocked on a failed run). Raw pages: crash output
+  was silent before — learners saw only "Tests failed".
+- **`POST /api/answer` validates the choice index** — out-of-range or negative
+  choice is a 400 (`IndexError` crash fixed; `test_answer_out_of_range_choice_is_400`).
+- **Dead CSS hooks removed** — `.review-page` / `.review-card` had no rules and
+  were dropped from `review.js`; the review test now selects `.panel`.
 
 ## Deferred backlog (top first)
 

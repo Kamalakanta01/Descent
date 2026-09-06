@@ -52,6 +52,13 @@ def test_answer_bad_qindex_is_400(client):
     assert r.status_code == 400
 
 
+def test_answer_out_of_range_choice_is_400(client):
+    r = client.post("/api/answer", json={"lesson_id": "w0u0l1", "q_index": 0, "choice": 99})
+    assert r.status_code == 400
+    r = client.post("/api/answer", json={"lesson_id": "w0u0l1", "q_index": 0, "choice": -1})
+    assert r.status_code == 400
+
+
 def test_run_unknown_lesson_is_404(client):
     r = client.post("/api/checkpoint/run", json={"lesson_id": "nope", "code": "int main(void){return 0;}\n"})
     assert r.status_code == 404
@@ -181,6 +188,21 @@ def test_checkpoint_repass_pays_review_xp_only_when_due(client):
 
     r = client.post("/api/checkpoint/run", json={"lesson_id": "w0u0l1", "code": W0L1_INTEGRATE})
     assert r.json()["passed"] is True and r.json()["xp"] == 3  # XP_REVIEW
+
+
+def test_compile_error_does_not_decay_skill(client):
+    s = main.db.load()
+    s["skills"]["w0u0l1"] = {"h_days": 1.0, "last_practiced": time.time(), "correct": 1, "incorrect": 0}
+    main.db.save(s)
+
+    r = client.post("/api/checkpoint/run", json={"lesson_id": "w0u0l1", "code": "int broken(("})
+    assert r.status_code == 200
+    assert r.json()["passed"] is False
+    assert r.json()["compiled"] is False
+
+    sk = main.db.load()["skills"]["w0u0l1"]
+    assert sk["h_days"] == 1.0, "half-life must not shrink on a compile error"
+    assert sk["incorrect"] == 0
 
 
 def test_review_queue_includes_generated_question_with_llm(client, monkeypatch):
