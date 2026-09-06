@@ -33,6 +33,7 @@ function lessonNode(lesson, unitState, idx) {
 function unitCard(unit, worldId) {
   const color = WORLD_COLORS[worldId % WORLD_COLORS.length];
   const isBoss = unit.kind === 'boss';
+  const empty = unit.state === 'empty';
   const card = h('div', {
     class: `unit-card ${unit.state}${isBoss ? ' boss-unit' : ''}`,
     style: `--unit-color:${color}`,
@@ -43,13 +44,21 @@ function unitCard(unit, worldId) {
     ]),
     h('div', { class: 'unit-title-wrap' }, [
       h('div', { class: 'unit-title' }, [esc(unit.title)]),
-      h('div', { class: 'unit-sub' }, [isBoss ? 'Boss battle' : `${unit.lessons.length} lessons`]),
+      h('div', { class: 'unit-sub' }, [isBoss ? 'Boss battle' : empty ? 'Coming soon' : `${unit.lessons.length} lessons`]),
     ]),
     unit.state === 'done' ? h('div', { class: 'crown-mini' }, [icon('crown')]) : null,
   ]);
+  card.append(head);
+  if (empty) {
+    card.append(h('div', { class: 'unit-empty' }, [
+      icon('spark'),
+      h('span', {}, 'This unit is still in the forge — its lessons are coming soon.'),
+    ]));
+    return card;
+  }
   const path = h('div', { class: 'lesson-path' });
   unit.lessons.forEach((l, i) => path.append(lessonNode(l, unit.state, i)));
-  card.append(head, path);
+  card.append(path);
   const anyClickable = unit.lessons.some(l => l.status !== 'locked');
   if (unit.state === 'locked' && !anyClickable && unit.lessons.length) {
     card.append(h('div', { class: 'unit-lock-overlay' }, [icon('lock'), h('span', {}, 'Complete the previous unit to unlock') ]));

@@ -24,7 +24,7 @@ Deps live in `backend/requirements.txt`. First setup: `python3 -m venv .venv && 
 ## Architecture / layout
 
 - `backend/app/` — FastAPI app (`main.py` wires everything). `hlr.py` (spaced repetition), `gating.py` (unlock chain), `store.py` (JSON persistence), `runner.py` (C compile/run), `llm.py` (OpenRouter), `content.py` (curriculum loader).
-- `backend/content/` — `tree.json` = metadata for **all 8 worlds**; `worldN.json` = authored lessons. Only `world0.json` has real content (18 lessons + Boss 0); worlds 1–7 are placeholders.
+- `backend/content/` — `tree.json` = metadata for **all 8 worlds**; `worldN.json` = authored lessons. Only `world0.json` has real content (19 lessons + Boss 0); worlds 1–7 are placeholders.
 - `frontend/` — ES-module SPA, no build. `index.html` → `app.js` → `views/{path,lesson,review}.js` + `api.js` + `views/dom.js`.
 - `data/state.json` — learner state, generated at first run; gitignored, safe to delete to reset.
 
@@ -32,6 +32,7 @@ Deps live in `backend/requirements.txt`. First setup: `python3 -m venv .venv && 
 
 - **Tests fail from repo root** — they import `app.*`, so run them from `backend/` with `PYTHONPATH=.`.
 - **C checkpoints**: backend runs learner code with real `gcc`. Function checkpoints: harness (from content) does `#include "learner.c"`; `exit 0` = pass. Program/boss checkpoints (`kind: "program"`) need a named validator in `runner.py` `VALIDATORS` and a `validator` field in content — add both when adding one.
+- **Boss 0**: spring sim (`F = -k·r` to box centre (50,50), `K={40,30,35}`, 200 ticks × 3 balls). Pass = velocity Verlet (or any symplectic scheme): the energy check trips on turning-point radius growth > 0.5, which explicit Euler causes. Don't "fix" it back to gravity-bounce — that physics is energy-stable under any integrator and can't discriminate.
 - **Never leak quiz answers**: `GET /api/lesson/{id}` strips the practice `answer` field; if you add a field used for grading, hide it from that endpoint too.
 - **OpenRouter key** in `backend/.env` (gitignored, loaded via python-dotenv). `llm.py` works keyless and falls back to static authored hints — don't hardcode the key anywhere.
 - **Gating stalls on content-less units**: units in worlds 1–7 have no lessons, so the linear unlock chain stops there by design until you author their `worldN.json`.

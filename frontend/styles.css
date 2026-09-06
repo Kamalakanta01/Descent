@@ -115,10 +115,18 @@ a.hud-pill:hover { text-decoration: none; border-color: var(--green); }
 .unit-card.available:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(0,0,0,0.35); }
 .unit-card.done { border-color: color-mix(in srgb, var(--green) 40%, var(--line)); }
 .unit-card.locked { opacity: 0.72; }
+.unit-card.empty { border-style: dashed; border-color: var(--line); }
 .unit-card.boss-unit::after {
   content: ''; position: absolute; inset: 0; border-radius: 16px; pointer-events: none;
   background: radial-gradient(circle at 100% 0%, rgba(255,107,107,0.10), transparent 55%);
 }
+
+.unit-empty {
+  display: flex; align-items: center; gap: 10px; padding: 18px;
+  border-radius: 12px; background: var(--bg-panel-2);
+  color: var(--dim); font-size: 13.5px; font-weight: 500;
+}
+.unit-empty .icon svg { width: 20px; height: 20px; }
 
 .unit-head { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
 .unit-badge {

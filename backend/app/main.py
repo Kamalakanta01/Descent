@@ -5,7 +5,9 @@ Run:  ../.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 from __future__ import annotations
 
+import json
 import os
+import secrets
 import time
 from pathlib import Path
 
@@ -46,6 +48,19 @@ SOCRATIC_SYSTEM = (
     "Plain text, no markdown."
 )
 
+FOLLOWUP_SYSTEM = (
+    "You are a C/gamedev tutor generating a follow-up multiple-choice question for "
+    "a learner who answered wrong. Output ONLY a JSON object with keys: "
+    '"q" (question string), "choices" (3 short strings), "answer" (0-based index of '
+    'the correct choice), "explanation" (1-2 sentences). Adapt difficulty to the '
+    "learner's mastery: half-life < 1 day means generate an easier stepping-stone "
+    "question; >= 4 days means a harder one. No markdown fences, no extra text."
+)
+
+# Ephemeral answers for LLM-generated follow-up questions: token -> {"answer", "explanation"}.
+# In-memory only — a restart drops unanswered follow-ups, which is fine (regenerated on demand).
+FOLLOWUPS: dict[str, dict] = {}
+
 
 class AnswerReq(BaseModel):
     lesson_id: str
@@ -63,6 +78,33 @@ class HintReq(BaseModel):
     q_index: int | None = None
     wrong_answer: str | None = None
     compile_errors: str | None = None
+
+
+class FollowupReq(BaseModel):
+    token: str
+    choice: int
+
+
+def _parse_followup(text: str | None) -> dict | None:
+    """Validate the LLM's follow-up JSON; tolerate markdown fences around it."""
+    if not text:
+        return None
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
+    try:
+        obj = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    q, choices, answer = obj.get("q"), obj.get("choices"), obj.get("answer")
+    if not isinstance(q, str) or not isinstance(choices, list):
+        return None
+    if len(choices) < 2 or not all(isinstance(c, str) for c in choices):
+        return None
+    if not isinstance(answer, int) or not (0 <= answer < len(choices)):
+        return None
+    return {"q": q, "choices": choices, "answer": answer,
+            "explanation": str(obj.get("explanation", ""))}
 
 
 def _skill_summary(state: dict) -> dict:
@@ -95,7 +137,8 @@ def _curriculum_view(state: dict) -> dict:
                     unit_state = "done"
                 elif u["id"] in unlocked:
                     unit_state = "available"
-            unit_state = unit_state if u["id"] in unlocked else "locked"
+                else:
+                    unit_state = "locked"
             lesson_list = []
             for les, st in zip(lessons, statuses):
                 sk = state["skills"].get(les["id"])
@@ -240,12 +283,41 @@ def post_answer(req: AnswerReq):
         xp_delta = XP_REVIEW if is_review else XP_PRACTICE
         state["xp"] += xp_delta
     db.save(state)
-    return {
+    resp: dict = {
         "correct": correct,
         "explanation": item.get("explanation", ""),
         "xp": xp_delta,
         "h_days": round(record["h_days"], 3),
     }
+    if not correct:
+        followup = _try_followup(lesson, item, req.choice, record["h_days"])
+        if followup:
+            resp["followup"] = followup
+    return resp
+
+
+def _try_followup(lesson: dict, item: dict, wrong_choice: int, h_days: float) -> dict | None:
+    """Ask the LLM for an adjusted-difficulty follow-up. Answer stays server-side."""
+    prompt = (
+        f"Lesson: {lesson['title']}\nQuestion: {item['q']}\n"
+        f"Learner picked (wrong): {item['choices'][wrong_choice]}\n"
+        f"Correct answer: {item['choices'][item['answer']]}\n"
+        f"Mastery half-life: {h_days:.2f} days"
+    )
+    parsed = _parse_followup(llm_client.chat(FOLLOWUP_SYSTEM, prompt, max_models=3)[0])
+    if not parsed:
+        return None
+    token = secrets.token_urlsafe(12)
+    FOLLOWUPS[token] = {"answer": parsed["answer"], "explanation": parsed["explanation"]}
+    return {"token": token, "q": parsed["q"], "choices": parsed["choices"]}
+
+
+@app.post("/api/followup/answer")
+def post_followup_answer(req: FollowupReq):
+    rec = FOLLOWUPS.pop(req.token, None)  # one-shot
+    if not rec:
+        raise HTTPException(status_code=404, detail="unknown follow-up")
+    return {"correct": req.choice == rec["answer"], "explanation": rec["explanation"]}
 
 
 @app.post("/api/checkpoint/run")

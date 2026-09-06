@@ -40,7 +40,10 @@ FALLBACK_MODELS = [
     "nvidia/nemotron-3-super-120b-a12b:free",
 ]
 
-CACHE_TTL_S = 600  # refresh candidate list every 10 min
+CACHE_TTL_S = 600                # refresh candidate list every 10 min
+BACKOFF_S = 0.5                  # pause between failed candidates
+BACKOFF_RATE_LIMIT_S = 5.0       # extra wait when OpenRouter says "slow down"
+RATE_LIMIT_STATUSES = {429, 529}  # 429 too many requests; 529 overloaded
 
 
 def _is_free(model: dict) -> bool:
@@ -145,15 +148,15 @@ class LLMClient:
             try:
                 status, body = self._post(CHAT_URL, headers, payload, timeout)
             except Exception:
-                self._sleep(0.5)
+                self._sleep(BACKOFF_S)
                 continue
             if status == 200:
                 try:
                     content = body["choices"][0]["message"]["content"].strip()
                 except (KeyError, IndexError, TypeError):
-                    self._sleep(0.5)
+                    self._sleep(BACKOFF_S)
                     continue
                 if content:
                     return content, model
-            self._sleep(0.5)
+            self._sleep(BACKOFF_RATE_LIMIT_S if status in RATE_LIMIT_STATUSES else BACKOFF_S)
         return None, None

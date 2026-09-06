@@ -58,17 +58,32 @@ def test_chat_returns_content_and_model_on_200():
 
 def test_chat_falls_through_to_next_model_on_429():
     posts = []
+    sleeps = []
     def post(url, headers, payload, timeout):
         posts.append(payload["model"])
         return 429, {"error": "rate limited"}
     client = llm.LLMClient(
         api_key="x",
         get_fn=lambda *a, **kw: fake_models(["deepseek/a:free", "qwen/b:free", "z-ai/c:free"]),
-        post_fn=post, sleep_fn=lambda *a, **k: None,
+        post_fn=post, sleep_fn=lambda s, *a, **k: sleeps.append(s),
     )
     content, model = client.chat("system", "user", max_models=3)
     assert content is None and model is None
     assert len(posts) == 3
+    assert sleeps == [llm.BACKOFF_RATE_LIMIT_S] * 3
+
+
+def test_chat_backs_off_short_on_generic_failure():
+    sleeps = []
+    def post(url, headers, payload, timeout):
+        return 500, {"error": "boom"}
+    client = llm.LLMClient(
+        api_key="x",
+        get_fn=lambda *a, **kw: fake_models(["deepseek/a:free", "qwen/b:free"]),
+        post_fn=post, sleep_fn=lambda s, *a, **k: sleeps.append(s),
+    )
+    client.chat("system", "user", max_models=2)
+    assert sleeps == [llm.BACKOFF_S] * 2
 
 
 def test_chat_without_key_returns_none():

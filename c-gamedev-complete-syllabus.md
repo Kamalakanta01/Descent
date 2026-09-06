@@ -72,7 +72,7 @@ Structured as **Worlds → Units → Lessons**. Every unit ends in a **Boss** (i
 - graphs (nav meshes/grids are graphs)
 - Big-O intuition — why O(n²) collision checks die at scale (sets up Unit 6's spatial partitioning)
 
-**Boss 0:** command-line particle sim — N balls, gravity, wall bounce, printed positions each tick. Pure math + data structures, zero rendering. Swap Euler for Verlet integration, watch stability difference.
+**Boss 0:** command-line particle sim — 3 balls tethered to the box centre by Hooke springs, positions printed each tick. Pure math + data structures, zero rendering. Swap explicit Euler for Verlet integration, watch amplitude (energy) stability difference — Euler leaks energy into the oscillator, Verlet doesn't.
 
 ## WORLD 1 — Seeing (raylib + 3D basics)
 

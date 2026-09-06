@@ -91,23 +91,25 @@ def _run(workdir: Path) -> dict:
 
 
 def validate_boss0(stdout: str) -> list[dict]:
-    """Boss 0 — CLI particle sim.
+    """Boss 0 — CLI particle sim (spring-tethered balls).
 
     Expected output: for tick t in 0..199, ball ids 0..2:
         T <tick> <id> <x> <y>
-    Constants: box 100x100, ball radius 1.0, gravity 9.8 (downward, y up).
+    Physics: each ball is tethered to the box centre (50, 50) by a Hooke
+    spring F = -k·r with per-ball stiffness k in {40, 30, 35}, dt = 0.01.
     Checks: exact line shape/order, finite numbers, balls inside the box,
-    total energy per ball never grows (E = y + 0.5*v²/g where v is recovered
-    from successive positions; Euler leaks energy, Verlet does not).
+    balls actually move, and turning-point radius stability — later outward
+    excursions (radius local maxima) must not exceed the first by more than
+    0.5. Explicit Euler pumps energy into an oscillator so the amplitude
+    grows every period; velocity Verlet is symplectic and the amplitude holds.
     """
     checks: list[dict] = []
 
     def add(name: str, ok: bool, detail: str = "") -> None:
         checks.append({"name": name, "ok": ok, "detail": detail})
 
+    CX = CY = 50.0
     W = H = 100.0
-    R = 1.0
-    G_MAG = 9.8
     lines = [ln for ln in stdout.strip().splitlines() if ln.strip()]
     add("line_count", len(lines) == 600, f"got {len(lines)} lines, expected 600")
 
@@ -142,57 +144,52 @@ def validate_boss0(stdout: str) -> list[dict]:
     add("order", order_ok, "lines must follow tick 0..199, ids 0,1,2 per tick")
     if not parse_ok:
         add("bounds", False, "could not parse output")
-        add("energy", False, "could not parse output")
         add("movement", False, "could not parse output")
+        add("energy", False, "could not parse output")
         return checks
 
     bounds_ok = True
     moved_ok = True
     for bid, traj in positions.items():
         for _, x, y in traj:
-            if not (R - 1e-3 <= x <= W - R + 1e-3 and R - 1e-3 <= y <= H - R + 1e-3):
+            if not (-1e-3 <= x <= W + 1e-3 and -1e-3 <= y <= H + 1e-3):
                 bounds_ok = False
                 break
         xs = [x for _, x, _ in traj]
         ys = [y for _, _, y in traj]
         if (max(xs) - min(xs)) + (max(ys) - min(ys)) < 1.0:
             moved_ok = False
-    add("bounds", bounds_ok, "every ball must stay inside [1, 99] x [1, 99]")
+    add("bounds", bounds_ok, "every ball must stay inside [0, 100] x [0, 100]")
     add("movement", moved_ok, "balls must actually move")
 
-    # Energy check: per ball, compute total energy E = y + 0.5*v^2 / g at every
-    # tick (recovering v from successive y). With restitution 0.8, E should
-    # never grow; small positive drift is rounding noise. A bad integrator
-    # (Euler) will pump energy into the system and the ceiling check fails.
+    # Turning-point radius stability: per ball, r(t) = distance to centre.
+    # A correct (symplectic) integrator conserves energy, so later outward
+    # excursions match the first within rounding noise. Explicit Euler pumps
+    # energy into the spring and the amplitude grows by several units.
+    # (Recovering velocity from successive positions is too noisy near a
+    # turning point; radius maxima are a robust proxy for amplitude.)
     energy_ok = True
     for bid, traj in positions.items():
-        if len(traj) < 2:
+        if len(traj) < 3:
             energy_ok = False
             continue
-        emax = -1e30
-        for i in range(1, len(traj)):
-            y_prev = traj[i - 1][2]
-            y_curr = traj[i][2]
-            dt = 0.01
-            vy = (y_curr - y_prev) / dt
-            E = y_curr + 0.5 * vy * vy / G_MAG
-            if E > emax:
-                emax = E
-        # Find the earliest peak (the initial release energy).
-        e_peak_initial = -1e30
-        for i in range(min(40, len(traj))):
-            y_prev = traj[i - 1][2] if i > 0 else traj[0][2]
-            y_curr = traj[i][2]
-            dt = 0.01
-            vy = (y_curr - y_prev) / dt
-            E = y_curr + 0.5 * vy * vy / G_MAG
-            if E > e_peak_initial:
-                e_peak_initial = E
-        if emax > e_peak_initial + 0.5:
+        radii = [math.hypot(x - CX, y - CY) for _, x, y in traj]
+        maxima = [
+            radii[i] for i in range(1, len(radii) - 1)
+            if radii[i] >= radii[i - 1] and radii[i] >= radii[i + 1]
+        ]
+        if len(maxima) < 2:
+            continue  # not enough turning points to judge amplitude
+        first = maxima[0]
+        if any(m > first + 0.5 for m in maxima[1:]):
             energy_ok = False
             break
 
-    add("energy", energy_ok, "total energy must not grow (Euler leaks energy; use Verlet)")
+    add(
+        "energy",
+        energy_ok,
+        "amplitude must not grow between turning points (Euler leaks energy; use Verlet)",
+    )
     return checks
 
 

@@ -1,5 +1,7 @@
 """HTTP-level tests via FastAPI TestClient (catches tuple-vs-HTTPException bugs)."""
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -81,3 +83,63 @@ def test_review_xp_after_pass_is_3(client):
     r = client.post("/api/answer", json={"lesson_id": "w0u0l1", "q_index": 0, "choice": 0})
     assert r.status_code == 200
     assert r.json()["xp"] == 3
+
+
+class _StubLLM:
+    def __init__(self, reply):
+        self.reply = reply
+
+    def chat(self, *a, **kw):
+        return (self.reply, "stub/model") if self.reply else (None, None)
+
+
+FOLLOWUP_JSON = json.dumps({
+    "q": "Simpler: what does a += b do to a?",
+    "choices": ["Adds b into a", "Copies a into b", "Clears a"],
+    "answer": 0,
+    "explanation": "a += b updates a in place.",
+})
+
+
+def _wrong(client):
+    return client.post("/api/answer", json={"lesson_id": "w0u0l1", "q_index": 0, "choice": 1})
+
+
+def test_wrong_answer_offers_followup_and_scores_it(client, monkeypatch):
+    monkeypatch.setattr(main, "llm_client", _StubLLM(FOLLOWUP_JSON))
+    r = _wrong(client)
+    body = r.json()
+    assert body["correct"] is False
+    fu = body["followup"]
+    assert "answer" not in fu and fu["choices"] and fu["token"]
+
+    r = client.post("/api/followup/answer", json={"token": fu["token"], "choice": 0})
+    assert r.json()["correct"] is True
+    assert r.json()["explanation"]
+
+    # token is one-shot
+    r = client.post("/api/followup/answer", json={"token": fu["token"], "choice": 0})
+    assert r.status_code == 404
+
+
+def test_followup_rejects_unknown_token(client):
+    r = client.post("/api/followup/answer", json={"token": "nope", "choice": 0})
+    assert r.status_code == 404
+
+
+def test_no_followup_when_llm_silent_or_wrong_is_right(client, monkeypatch):
+    monkeypatch.setattr(main, "llm_client", _StubLLM(None))
+    assert "followup" not in _wrong(client).json()
+    monkeypatch.setattr(main, "llm_client", _StubLLM(FOLLOWUP_JSON))
+    r = client.post("/api/answer", json={"lesson_id": "w0u0l1", "q_index": 0, "choice": 0})
+    assert "followup" not in r.json()
+
+
+def test_followup_tolerates_markdown_fences(client, monkeypatch):
+    monkeypatch.setattr(main, "llm_client", _StubLLM("```json\n" + FOLLOWUP_JSON + "\n```"))
+    assert "followup" in _wrong(client).json()
+
+
+def test_followup_absent_on_garbage_llm_json(client, monkeypatch):
+    monkeypatch.setattr(main, "llm_client", _StubLLM("not json at all"))
+    assert "followup" not in _wrong(client).json()

@@ -89,31 +89,34 @@ def test_infinite_loop_is_timed_out():
 
 BOSS0_REFERENCE = r"""
 #include <stdio.h>
-#include <math.h>
-typedef struct { float x, y, vx, vy, px, py; } Ball;
-static const float G = -9.8f;
-static const float W = 100, H = 100, R = 1, REST = 0.8f, DT = 0.01f;
+static const float CX = 50.0f, CY = 50.0f;
+static const float K[3] = {40.0f, 30.0f, 35.0f};
+static const float DT = 0.01f;
 
-static void verlet_step(Ball *b) {
-    b->x  += b->vx * DT + 0.5f * 0 * DT * DT;
-    b->y  += b->vy * DT + 0.5f * G * DT * DT;
-    b->vx += 0;
-    b->vy += G * DT;
-    if (b->x < R)        { b->x = R;       b->vx = -b->vx * REST; }
-    if (b->x > W - R)    { b->x = W - R;   b->vx = -b->vx * REST; }
-    if (b->y < R)        { b->y = R;       b->vy = -b->vy * REST; }
-    if (b->y > H - R)    { b->y = H - R;   b->vy = -b->vy * REST; }
+typedef struct { float x, y, vx, vy; } Ball;
+
+/* Velocity Verlet (kick-drift-kick). Acceleration is recomputed at the new
+ * position so the velocity update averages old and new. */
+static void step(Ball *b, int i) {
+    float dx = b->x - CX, dy = b->y - CY;
+    float ax = -K[i] * dx, ay = -K[i] * dy;
+    b->x  += b->vx * DT + 0.5f * ax * DT * DT;
+    b->y  += b->vy * DT + 0.5f * ay * DT * DT;
+    dx = b->x - CX; dy = b->y - CY;
+    float ax2 = -K[i] * dx, ay2 = -K[i] * dy;
+    b->vx += 0.5f * (ax + ax2) * DT;
+    b->vy += 0.5f * (ay + ay2) * DT;
 }
 
 int main(void) {
     Ball balls[3] = {
-        {10, 90, 15,  0,  10, 90},
-        {50, 70, -8, 20,  50, 70},
-        {90, 95, -20, -5, 90, 95},
+        {65, 50,  8, 0},
+        {50, 62,  0, 8},
+        {40, 50,  7, 5},
     };
     const int TICKS = 200;
     for (int t = 0; t < TICKS; t++) {
-        for (int i = 0; i < 3; i++) verlet_step(&balls[i]);
+        for (int i = 0; i < 3; i++) step(&balls[i], i);
         for (int i = 0; i < 3; i++) printf("T %d %d %.4f %.4f\n", t, i, balls[i].x, balls[i].y);
     }
     return 0;
@@ -127,3 +130,49 @@ def test_boss0_reference_passes_validator():
     assert res["compiled"] is True
     assert res["passed"] is True, [c for c in res["checks"]]
     assert any(c["name"] == "deterministic" and c["ok"] for c in res["checks"])
+
+
+# The explicit-Euler starter must NOT pass: it pumps energy into the spring and
+# the amplitude grows. This guards the original design bug where constant-gravity
+# bounce physics passed under any integrator.
+BOSS0_EULER_STARTER = r"""
+#include <stdio.h>
+static const float CX = 50.0f, CY = 50.0f;
+static const float K[3] = {40.0f, 30.0f, 35.0f};
+static const float DT = 0.01f;
+
+typedef struct { float x, y, vx, vy; } Ball;
+
+/* Explicit Euler: position first, then velocity — pumps energy. */
+static void step(Ball *b, int i) {
+    float dx = b->x - CX, dy = b->y - CY;
+    float ax = -K[i] * dx, ay = -K[i] * dy;
+    b->x  += b->vx * DT;
+    b->y  += b->vy * DT;
+    b->vx += ax * DT;
+    b->vy += ay * DT;
+}
+
+int main(void) {
+    Ball balls[3] = {
+        {65, 50,  8, 0},
+        {50, 62,  0, 8},
+        {40, 50,  7, 5},
+    };
+    const int TICKS = 200;
+    for (int t = 0; t < TICKS; t++) {
+        for (int i = 0; i < 3; i++) step(&balls[i], i);
+        for (int i = 0; i < 3; i++) printf("T %d %d %.4f %.4f\n", t, i, balls[i].x, balls[i].y);
+    }
+    return 0;
+}
+"""
+
+
+def test_boss0_euler_starter_fails_energy_check():
+    cp = {"kind": "program", "validator": "boss0"}
+    res = runner.compile_and_run(cp, BOSS0_EULER_STARTER)
+    assert res["compiled"] is True
+    assert res["passed"] is False
+    energy = next(c for c in res["checks"] if c["name"] == "energy")
+    assert energy["ok"] is False
