@@ -109,6 +109,21 @@ Fresh machine setup: `python3 -m venv .venv && .venv/bin/pip install -r backend/
   choice is a 400 (`IndexError` crash fixed; `test_answer_out_of_range_choice_is_400`).
 - **Dead CSS hooks removed** — `.review-page` / `.review-card` had no rules and
   were dropped from `review.js`; the review test now selects `.panel`.
+- **Review "Re-run checkpoint" fixed honestly** — the button used to POST the
+  blank `starter_code`, so it failed for everyone every time (its mock only
+  asserted the POST fired). Now:
+  - Checkpoint editor extracted to `frontend/views/editor.js` (`checkpointEditor`)
+    shared by lesson + review pages (gutter, Tab→4-space, Run, Hint, result box).
+  - Review card's "Re-attempt from memory" expands the editor pre-filled with
+    the blank starter — genuine retrieval practice, and pass/fail drives HLR
+    normally. (Replays of a persisted solution were rejected: a deterministic
+    pass would falsely grow `h_days` on a forgotten skill.)
+  - The **last-passing submission persists** (`state.solutions`, set in
+    `/api/checkpoint/run` on pass, shown via `has_solution` flags + new
+    `GET /api/lesson/{id}/solution`). "Show old solution" → `revealed: true`
+    run, which is graded but **scores nothing** (no XP, no HLR update) — the
+    reveal is visible but silent in the signal. Guarded by
+    `test_revealed_run_scores_nothing` + jsdom reveal test.
 
 ## Deferred backlog (top first)
 

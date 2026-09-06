@@ -205,6 +205,61 @@ def test_compile_error_does_not_decay_skill(client):
     assert sk["incorrect"] == 0
 
 
+W0L1_INTEGRATE_B = W0L1_INTEGRATE.replace("ps[i].vy -= 9.8f * dt;", "ps[i].vy -= 9.8f * dt;  // variant")
+
+
+def test_passing_run_persists_and_overwrites_solution(client):
+    r = client.post("/api/checkpoint/run", json={"lesson_id": "w0u0l1", "code": W0L1_INTEGRATE})
+    assert r.json()["passed"] is True
+    assert main.db.load()["solutions"]["w0u0l1c"] == W0L1_INTEGRATE
+
+    r = client.get("/api/lesson/w0u0l1")
+    assert r.json()["has_solution"] is True
+    r = client.get("/api/lesson/w0u0l1/solution")
+    assert r.json()["code"] == W0L1_INTEGRATE
+
+    r = client.post("/api/checkpoint/run", json={"lesson_id": "w0u0l1", "code": W0L1_INTEGRATE_B})
+    assert r.json()["passed"] is True
+    assert main.db.load()["solutions"]["w0u0l1c"] == W0L1_INTEGRATE_B
+
+
+def test_solution_404_before_any_pass(client):
+    r = client.get("/api/lesson/w0u0l1/solution")
+    assert r.status_code == 404
+    r = client.get("/api/lesson/w0u0l1")
+    assert r.json()["has_solution"] is False
+
+
+def test_revealed_run_scores_nothing(client):
+    # honest first pass
+    r = client.post("/api/checkpoint/run", json={"lesson_id": "w0u0l1", "code": W0L1_INTEGRATE})
+    assert r.json()["passed"] is True
+    xp_after, attempts_after = r.json()["xp"], 1
+
+    # make the skill due so an honest re-pass would pay XP_REVIEW
+    s = main.db.load()
+    sk = s["skills"]["w0u0l1"]
+    sk["h_days"] = 0.001
+    sk["last_practiced"] = time.time() - 3 * 86400
+    main.db.save(s)
+
+    # revealed pass: graded, but no XP and no HLR update
+    r = client.post("/api/checkpoint/run",
+                    json={"lesson_id": "w0u0l1", "code": W0L1_INTEGRATE, "revealed": True})
+    assert r.json()["passed"] is True
+    assert r.json()["xp"] == 0
+    sk2 = main.db.load()["skills"]["w0u0l1"]
+    assert sk2["h_days"] == sk["h_days"] and sk2["last_practiced"] == sk["last_practiced"]
+
+    # revealed FAIL also leaves the HLR untouched
+    r = client.post("/api/checkpoint/run",
+                    json={"lesson_id": "w0u0l1", "code": W0L1_INTEGRATE.replace("-= 9.8f", " += 9.8f"), "revealed": True})
+    assert r.json()["passed"] is False
+    sk3 = main.db.load()["skills"]["w0u0l1"]
+    assert sk3["h_days"] == sk["h_days"] and sk3["incorrect"] == sk["incorrect"]
+    assert main.db.load()["xp"] == xp_after  # frozen at the honest run's XP
+
+
 def test_review_queue_includes_generated_question_with_llm(client, monkeypatch):
     monkeypatch.setattr(main, "llm_client", _StubLLM(FOLLOWUP_JSON))
     s = main.db.load()

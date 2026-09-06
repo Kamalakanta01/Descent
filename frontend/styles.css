@@ -338,12 +338,14 @@ a.hud-pill:hover { text-decoration: none; border-color: var(--green); }
 /* ---------- review page ---------- */
 .review-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
 .review-head h3 { margin: 0; }
-.rerun-res {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 10px;
+.review-retry { margin-top: 14px; }
+.editor-note.hidden { display: none; }
+.editor-note {
+  display: flex; align-items: center; gap: 6px;
+  color: var(--gold); font-size: 13px; font-weight: 600;
+  background: color-mix(in srgb, var(--gold) 10%, transparent);
+  padding: 8px 12px; border-radius: 10px; margin-top: 10px;
 }
-.rerun-res.ok { color: var(--green); background: color-mix(in srgb, var(--green) 10%, transparent); }
-.rerun-res.bad { color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); }
 .p-badge { display: inline-flex; align-items: center; gap: 5px; color: var(--gold); font-weight: 700; white-space: nowrap; }
 .empty-panel { text-align: center; padding: 60px 30px; }
 .empty-icon .icon svg { width: 48px; height: 48px; color: var(--green); }

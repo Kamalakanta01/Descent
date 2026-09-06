@@ -33,8 +33,8 @@ Deps live in `backend/requirements.txt`. First setup: `python3 -m venv .venv && 
 
 - `backend/app/` — FastAPI app (`main.py` wires everything). `hlr.py` (spaced repetition), `gating.py` (unlock chain), `store.py` (JSON persistence), `runner.py` (C compile/run), `llm.py` (OpenRouter), `content.py` (curriculum loader).
 - `backend/content/` — `tree.json` = metadata for **all 8 worlds**; `worldN.json` = authored lessons. Only `world0.json` has real content (19 lessons + Boss 0); worlds 1–7 are placeholders.
-- `frontend/` — ES-module SPA, no build. `index.html` → `app.js` → `views/{path,lesson,review}.js` + `api.js` + `views/dom.js`.
-- `data/state.json` — learner state, generated at first run; gitignored, safe to delete to reset.
+- `frontend/` — ES-module SPA, no build. `index.html` → `app.js` → `views/{path,lesson,review}.js` + `api.js` + `views/dom.js`. Build-a-checkpoint UI is shared: `views/editor.js` (`checkpointEditor`) is used by both the lesson page and the review page's "Re-attempt from memory".
+- `data/state.json` — learner state, generated at first run; gitignored, safe to delete to reset. Now includes `solutions: {checkpoint_id: code}` (last-passing submission; used only by the gated "Show old solution" reveal — revealed runs are graded but never mutate XP/HLR).
 
 ## Gotchas
 

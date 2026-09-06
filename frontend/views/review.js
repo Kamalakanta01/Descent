@@ -1,4 +1,5 @@
-import { h, icon, esc, toast, quizCard, xpFly } from './dom.js';
+import { h, icon, esc, quizCard, xpFly } from './dom.js';
+import { checkpointEditor } from './editor.js';
 import { api } from '../api.js';
 import { refreshHud } from '../app.js';
 
@@ -53,23 +54,21 @@ export async function renderReview(root) {
       h('a', { class: 'ghost-btn small', href: `#/lesson/${item.lesson_id}` }, ['Re-open lesson →']),
     ]);
     if (item.checkpoint) {
-      const rerun = h('button', { class: 'ghost-btn small' }, [icon('code'), ' Re-run checkpoint']);
-      rerun.addEventListener('click', async () => {
-        rerun.disabled = true; rerun.textContent = 'Running…';
-        try {
-          const res = await api.runCheckpoint(item.lesson_id, item.checkpoint.starter_code);
-          rerun.replaceWith(h('span', { class: `rerun-res ${res.passed ? 'ok' : 'bad'}` }, [
-            res.passed ? [icon('check'), ' still passes — that memory is solid'] : [icon('skull'), ' fails now — re-open the lesson'],
-          ]));
-          if (res.passed && res.xp) toast(`+${res.xp} XP`, 'success');
-        } catch (e) {
-          toast(e.message, 'error');
-          rerun.disabled = false;
-          rerun.innerHTML = ''; rerun.append(icon('code'), ' Re-run checkpoint');
-        }
-        refreshHud();
+      let editorSlot = null;
+      const retry = h('button', { class: 'ghost-btn small' }, [icon('code'), ' Re-attempt from memory']);
+      retry.addEventListener('click', async () => {
+        if (editorSlot) { editorSlot.classList.toggle('hidden'); return; }
+        const ed = checkpointEditor({
+          lessonId: item.lesson_id,
+          starterCode: item.checkpoint.starter_code,
+          hasSolution: item.checkpoint.has_solution,
+        });
+        editorSlot = h('div', { class: 'review-retry' }, [ed.el]);
+        card.append(editorSlot);
+        retry.textContent = 'Hide editor';
+        ed.el.querySelector('.run-btn')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       });
-      actions.append(rerun);
+      actions.append(retry);
     }
     card.append(actions);
     page.append(card);

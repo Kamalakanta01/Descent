@@ -187,11 +187,51 @@ test('review page: generated question via followup token + checkpoint re-run', a
   assert.ok(genCard.querySelector('.choice-correct'));
   assert.ok(log.find(l => l.url === 'POST /api/followup/answer' && l.body.token === 'gtok'));
 
-  const rerun = [...cards[0].querySelectorAll('button')].find(b => /Re-run checkpoint/.test(b.textContent));
-  rerun.click();
+  const retry = [...cards[0].querySelectorAll('button')].find(b => /Re-attempt from memory/.test(b.textContent));
+  retry.click();
+  await tick();
+  const editor = document.querySelector('.review-retry .editor');
+  assert.ok(editor, 'inline editor expanded');
+  assert.equal(editor.value, '// TODO', 'prefilled with the blank starter');
+  editor.value = editor.value + '\nvy -= 9.8f * dt;';
+  document.querySelector('.review-retry .run-btn').click();
   await tick();
   const run = log.find(l => l.url === 'POST /api/checkpoint/run');
-  assert.ok(run, 'checkpoint re-run issued');
-  assert.equal(run.body.code, '// TODO');
-  assert.ok(cards[0].querySelector('.rerun-res.ok'));
+  assert.ok(run, 'checkpoint run issued');
+  assert.equal(run.body.code, '// TODO\nvy -= 9.8f * dt;', 'posts the edited code, not the starter stub');
+  assert.ok(document.querySelector('.review-retry .result-head.ok'), 'passing result rendered');
+  assert.ok(!document.querySelector('.review-retry .run-btn').disabled, 'run button re-enabled');
+});
+
+test('review page: show old solution loads it and marks the run revealed', async () => {
+  makeDom();
+  const log = routes({
+    'GET /api/review-queue': { due: [{
+      lesson_id: 'w0u0l1', title: 'Gravity', p_recall: 0.4,
+      practice: [], generated: null,
+      checkpoint: { title: 'Integrate the fall', kind: 'function', starter_code: '// TODO', has_solution: true },
+    }] },
+    'GET /api/lesson/w0u0l1/solution': { code: 'SOLUTION' },
+  });
+  const reviewView = await import('../views/review.js?rv_b');
+  await reviewView.renderReview(document.getElementById('app'));
+
+  const retry = [...document.querySelectorAll('button')].find(b => /Re-attempt from memory/.test(b.textContent));
+  retry.click();
+  await tick();
+  const editor = document.querySelector('.review-retry .editor');
+  assert.equal(editor.value, '// TODO');
+
+  const reveal = [...document.querySelectorAll('button')].find(b => /Show old solution/.test(b.textContent));
+  reveal.click();
+  await tick();
+  assert.ok(log.find(l => l.url === 'GET /api/lesson/w0u0l1/solution'), 'solution fetched');
+  assert.equal(editor.value, 'SOLUTION', 'old solution loaded into the editor');
+  assert.ok(!document.querySelector('.editor-note').classList.contains('hidden'), 'won\'t-count note visible');
+
+  document.querySelector('.review-retry .run-btn').click();
+  await tick();
+  const run = log.find(l => l.url === 'POST /api/checkpoint/run');
+  assert.equal(run.body.code, 'SOLUTION');
+  assert.equal(run.body.revealed, true, 'run marked revealed so it never scores');
 });

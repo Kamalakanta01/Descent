@@ -84,6 +84,7 @@ class AnswerReq(BaseModel):
 class RunReq(BaseModel):
     lesson_id: str
     code: str
+    revealed: bool = False  # learner opened their saved solution first
 
 
 class HintReq(BaseModel):
@@ -250,7 +251,19 @@ def get_lesson(lesson_id: str):
         },
         "attempts": state["attempts"].get(cp["id"], 0),
         "passed": cp["id"] in state["passed"],
+        "has_solution": cp["id"] in state["solutions"],
     }
+
+
+@app.get("/api/lesson/{lesson_id}/solution")
+def get_solution(lesson_id: str):
+    lesson = content.lesson(lesson_id)
+    if not lesson:
+        raise HTTPException(status_code=404, detail="lesson not found")
+    code = db.load()["solutions"].get(lesson["checkpoint"]["id"])
+    if code is None:
+        raise HTTPException(status_code=404, detail="no solution recorded")
+    return {"code": code}
 
 
 @app.get("/api/review-queue")
@@ -282,7 +295,8 @@ def get_review_queue():
                     ],
                     "generated": generated,
                     "checkpoint": (
-                        {"title": cp["title"], "kind": cp.get("kind"), "starter_code": cp["starter_code"]}
+                        {"title": cp["title"], "kind": cp.get("kind"), "starter_code": cp["starter_code"],
+                         "has_solution": cp["id"] in state["solutions"]}
                         if cp else None
                     ),
                 }
@@ -382,8 +396,13 @@ def post_run(req: RunReq):
     def score(state: dict) -> tuple[int, int, list[str]]:
         state["attempts"][cp["id"]] = state["attempts"].get(cp["id"], 0) + 1
         attempt_n = state["attempts"][cp["id"]]
+        if req.revealed:
+            # Grading only, no memory update: the learner loaded their stored
+            # solution, so a pass says nothing about recall.
+            return attempt_n, 0, []
         xp, newly = 0, []
         if res["passed"]:
+            state["solutions"][cp["id"]] = req.code
             if cp["id"] in state["passed"]:
                 # Re-pass as review: pays XP only when the skill is actually due.
                 sk = state["skills"].get(lesson["id"])

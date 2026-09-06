@@ -9,6 +9,7 @@ State shape:
                           "correct": int, "incorrect": int}},
   "attempts": {checkpoint_id: int},
   "passed": [checkpoint_id, ...],
+  "solutions": {checkpoint_id: last passing code},
   "unlocked_units": [unit_id, ...],
   "completed_lessons": [lesson_id, ...]
 }
@@ -36,6 +37,7 @@ def default_state() -> dict:
         "skills": {},
         "attempts": {},
         "passed": [],
+        "solutions": {},
         "unlocked_units": [],
         "completed_lessons": [],
     }
